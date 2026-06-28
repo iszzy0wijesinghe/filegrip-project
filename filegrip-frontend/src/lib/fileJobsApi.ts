@@ -18,6 +18,11 @@ export type FileJobResponse = {
   message?: string;
   download_url?: string | null;
   error_message?: string | null;
+  input_size_bytes?: number;
+  output_size_bytes?: number;
+  saved_bytes?: number;
+  saved_percent?: number;
+  was_compressed?: boolean;
 };
 
 export async function createFileJob({
