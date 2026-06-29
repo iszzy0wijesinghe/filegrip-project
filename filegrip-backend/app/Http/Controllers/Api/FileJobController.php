@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\FileTools\ImageToPdfService;
 use App\Services\FileTools\PdfSplitService;
+use App\Services\FileTools\PdfRotateService;
+use App\Services\FileTools\PdfDeletePagesService;
 use App\Models\DownloadToken;
 use App\Models\FileJob;
 use App\Models\FileJobFile;
@@ -25,7 +27,9 @@ class FileJobController extends Controller
         PdfMergeService $pdfMergeService,
         PdfCompressService $pdfCompressService,
         ImageToPdfService $imageToPdfService,
-        PdfSplitService $pdfSplitService
+        PdfSplitService $pdfSplitService,
+        PdfRotateService $pdfRotateService,
+        PdfDeletePagesService $pdfDeletePagesService
     ): JsonResponse {
         $tool = Tool::query()
             ->where('slug', $slug)
@@ -42,6 +46,8 @@ class FileJobController extends Controller
     'merge-pdf' => $this->processMergePdf($request, $tool, $pdfMergeService),
     'compress-pdf' => $this->processCompressPdf($request, $tool, $pdfCompressService),
     'split-pdf' => $this->processSplitPdf($request, $tool, $pdfSplitService),
+    'rotate-pdf' => $this->processRotatePdf($request, $tool, $pdfRotateService),
+    'delete-pdf-pages' => $this->processDeletePdfPages($request, $tool, $pdfDeletePagesService),
     'jpg-to-pdf', 'png-to-pdf', 'image-to-pdf' => $this->processImageToPdf($request, $tool, $imageToPdfService),
     default => response()->json([
         'message' => 'This tool API is coming next.',
@@ -619,6 +625,300 @@ private function processSplitPdf(
             'status' => 'failed',
             'tool_slug' => $tool->slug,
             'message' => 'PDF split failed.',
+            'download_url' => null,
+            'error_message' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+private function processRotatePdf(
+    Request $request,
+    Tool $tool,
+    PdfRotateService $pdfRotateService
+): JsonResponse {
+    $maxKb = ((int) ($tool->max_file_size_mb ?? 25)) * 1024;
+
+    $request->validate([
+        'files' => ['required', 'array', 'size:1'],
+        'files.*' => ['required', 'file', 'mimes:pdf', 'max:' . $maxKb],
+        'settings' => ['nullable', 'string'],
+    ]);
+
+    $settings = $this->decodeSettings($request->input('settings'));
+    $rotation = (int) ($settings['rotation'] ?? 90);
+
+    if (! in_array($rotation, [90, 180, 270], true)) {
+        return response()->json([
+            'message' => 'Invalid rotation value.',
+        ], 422);
+    }
+
+    $uploadedFile = $request->file('files')[0];
+    $uuid = (string) Str::uuid();
+
+    $job = FileJob::query()->create([
+        'uuid' => $uuid,
+        'job_uuid' => $uuid,
+        'tool_id' => $tool->id,
+        'status' => 'processing',
+        'priority' => 0,
+        'input_file_count' => 1,
+        'output_file_count' => 0,
+        'total_input_size_bytes' => 0,
+        'total_output_size_bytes' => 0,
+        'settings' => $settings,
+        'ip_address' => $request->ip(),
+        'user_agent' => substr((string) $request->userAgent(), 0, 500),
+        'started_at' => now(),
+        'expires_at' => now()->addHour(),
+    ]);
+
+    try {
+        $extension = strtolower($uploadedFile->getClientOriginalExtension() ?: 'pdf');
+        $inputStoredName = 'input-' . Str::random(16) . '.' . $extension;
+
+        $inputRelativePath = $uploadedFile->storeAs(
+            "file_jobs/{$uuid}/input",
+            $inputStoredName,
+            'local'
+        );
+
+        $inputAbsolutePath = Storage::disk('local')->path($inputRelativePath);
+        $inputSize = (int) $uploadedFile->getSize();
+
+        FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'input',
+            'original_name' => $uploadedFile->getClientOriginalName(),
+            'stored_name' => $inputStoredName,
+            'mime_type' => $uploadedFile->getClientMimeType() ?: 'application/pdf',
+            'extension' => $extension,
+            'size_bytes' => $inputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $inputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $inputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $outputStoredName = 'filegrip-rotated-' . now()->format('Ymd-His') . '.pdf';
+        $outputRelativePath = "file_jobs/{$uuid}/output/{$outputStoredName}";
+        $outputAbsolutePath = Storage::disk('local')->path($outputRelativePath);
+
+        Storage::disk('local')->makeDirectory("file_jobs/{$uuid}/output");
+
+        $pdfRotateService->rotate($inputAbsolutePath, $outputAbsolutePath, $rotation);
+
+        $outputSize = filesize($outputAbsolutePath) ?: 0;
+
+        $outputFile = FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'output',
+            'original_name' => 'filegrip-rotated.pdf',
+            'stored_name' => $outputStoredName,
+            'mime_type' => 'application/pdf',
+            'extension' => 'pdf',
+            'size_bytes' => $outputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $outputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $outputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $plainToken = Str::random(72);
+
+        DownloadToken::query()->create([
+            'file_job_file_id' => $outputFile->id,
+            'token_hash' => hash('sha256', $plainToken),
+            'download_count' => 0,
+            'max_downloads' => 5,
+            'expires_at' => now()->addHour(),
+            'created_at' => now(),
+        ]);
+
+        $job->update([
+            'status' => 'completed',
+            'output_file_count' => 1,
+            'total_input_size_bytes' => $inputSize,
+            'total_output_size_bytes' => $outputSize,
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'completed',
+            'tool_slug' => $tool->slug,
+            'message' => "Your PDF was rotated {$rotation}° successfully.",
+            'download_url' => url("/api/v1/downloads/{$plainToken}"),
+            'input_size_bytes' => $inputSize,
+            'output_size_bytes' => $outputSize,
+            'rotation' => $rotation,
+            'error_message' => null,
+        ]);
+    } catch (Throwable $e) {
+        $job->update([
+            'status' => 'failed',
+            'error_code' => 'rotate_pdf_failed',
+            'error_message' => $e->getMessage(),
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'failed',
+            'tool_slug' => $tool->slug,
+            'message' => 'PDF rotation failed.',
+            'download_url' => null,
+            'error_message' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+private function processDeletePdfPages(
+    Request $request,
+    Tool $tool,
+    PdfDeletePagesService $pdfDeletePagesService
+): JsonResponse {
+    $maxKb = ((int) ($tool->max_file_size_mb ?? 25)) * 1024;
+
+    $request->validate([
+        'files' => ['required', 'array', 'size:1'],
+        'files.*' => ['required', 'file', 'mimes:pdf', 'max:' . $maxKb],
+        'settings' => ['nullable', 'string'],
+    ]);
+
+    $settings = $this->decodeSettings($request->input('settings'));
+    $deletePagesText = trim((string) ($settings['delete_pages'] ?? ''));
+
+    if ($deletePagesText === '') {
+        return response()->json([
+            'message' => 'Please select at least one page to delete.',
+        ], 422);
+    }
+
+    $uploadedFile = $request->file('files')[0];
+    $uuid = (string) Str::uuid();
+
+    $job = FileJob::query()->create([
+        'uuid' => $uuid,
+        'job_uuid' => $uuid,
+        'tool_id' => $tool->id,
+        'status' => 'processing',
+        'priority' => 0,
+        'input_file_count' => 1,
+        'output_file_count' => 0,
+        'total_input_size_bytes' => 0,
+        'total_output_size_bytes' => 0,
+        'settings' => $settings,
+        'ip_address' => $request->ip(),
+        'user_agent' => substr((string) $request->userAgent(), 0, 500),
+        'started_at' => now(),
+        'expires_at' => now()->addHour(),
+    ]);
+
+    try {
+        $extension = strtolower($uploadedFile->getClientOriginalExtension() ?: 'pdf');
+        $inputStoredName = 'input-' . Str::random(16) . '.' . $extension;
+
+        $inputRelativePath = $uploadedFile->storeAs(
+            "file_jobs/{$uuid}/input",
+            $inputStoredName,
+            'local'
+        );
+
+        $inputAbsolutePath = Storage::disk('local')->path($inputRelativePath);
+        $inputSize = (int) $uploadedFile->getSize();
+
+        FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'input',
+            'original_name' => $uploadedFile->getClientOriginalName(),
+            'stored_name' => $inputStoredName,
+            'mime_type' => $uploadedFile->getClientMimeType() ?: 'application/pdf',
+            'extension' => $extension,
+            'size_bytes' => $inputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $inputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $inputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $outputStoredName = 'filegrip-cleaned-' . now()->format('Ymd-His') . '.pdf';
+        $outputRelativePath = "file_jobs/{$uuid}/output/{$outputStoredName}";
+        $outputAbsolutePath = Storage::disk('local')->path($outputRelativePath);
+
+        Storage::disk('local')->makeDirectory("file_jobs/{$uuid}/output");
+
+        $deleteResult = $pdfDeletePagesService->deletePages(
+            $inputAbsolutePath,
+            $outputAbsolutePath,
+            $deletePagesText
+        );
+
+        $outputSize = filesize($outputAbsolutePath) ?: 0;
+
+        $outputFile = FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'output',
+            'original_name' => 'filegrip-cleaned.pdf',
+            'stored_name' => $outputStoredName,
+            'mime_type' => 'application/pdf',
+            'extension' => 'pdf',
+            'size_bytes' => $outputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $outputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $outputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $plainToken = Str::random(72);
+
+        DownloadToken::query()->create([
+            'file_job_file_id' => $outputFile->id,
+            'token_hash' => hash('sha256', $plainToken),
+            'download_count' => 0,
+            'max_downloads' => 5,
+            'expires_at' => now()->addHour(),
+            'created_at' => now(),
+        ]);
+
+        $job->update([
+            'status' => 'completed',
+            'output_file_count' => 1,
+            'total_input_size_bytes' => $inputSize,
+            'total_output_size_bytes' => $outputSize,
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'completed',
+            'tool_slug' => $tool->slug,
+            'message' => 'Selected pages were deleted successfully.',
+            'download_url' => url("/api/v1/downloads/{$plainToken}"),
+            'input_size_bytes' => $inputSize,
+            'output_size_bytes' => $outputSize,
+            'page_count' => $deleteResult['page_count'],
+            'deleted_pages' => $deleteResult['deleted_pages'],
+            'deleted_pages_text' => $deleteResult['deleted_pages_text'],
+            'kept_pages' => $deleteResult['kept_pages'],
+            'kept_pages_text' => $deleteResult['kept_pages_text'],
+            'deleted_count' => $deleteResult['deleted_count'],
+            'kept_count' => $deleteResult['kept_count'],
+            'error_message' => null,
+        ]);
+    } catch (Throwable $e) {
+        $job->update([
+            'status' => 'failed',
+            'error_code' => 'delete_pdf_pages_failed',
+            'error_message' => $e->getMessage(),
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'failed',
+            'tool_slug' => $tool->slug,
+            'message' => 'PDF page deletion failed.',
             'download_url' => null,
             'error_message' => $e->getMessage(),
         ], 500);
