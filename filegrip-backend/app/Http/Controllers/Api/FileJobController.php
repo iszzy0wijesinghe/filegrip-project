@@ -8,6 +8,9 @@ use App\Services\FileTools\PdfSplitService;
 use App\Services\FileTools\PdfRotateService;
 use App\Services\FileTools\PdfDeletePagesService;
 use App\Services\FileTools\PdfToImageService;
+use App\Services\FileTools\WordToPdfService;
+use App\Services\FileTools\PdfToWordService;
+
 use App\Models\DownloadToken;
 use App\Models\FileJob;
 use App\Models\FileJobFile;
@@ -33,7 +36,9 @@ class FileJobController extends Controller
         PdfRotateService $pdfRotateService,
         PdfDeletePagesService $pdfDeletePagesService,
         PdfReorderPagesService $pdfReorderPagesService,
-        PdfToImageService $pdfToImageService
+        PdfToImageService $pdfToImageService,
+        WordToPdfService $wordToPdfService,
+        PdfToWordService $pdfToWordService
     ): JsonResponse {
         $tool = Tool::query()
             ->where('slug', $slug)
@@ -55,6 +60,8 @@ class FileJobController extends Controller
     'reorder-pdf-pages' => $this->processReorderPdfPages($request, $tool, $pdfReorderPagesService),
     'jpg-to-pdf', 'png-to-pdf', 'image-to-pdf' => $this->processImageToPdf($request, $tool, $imageToPdfService),
 'pdf-to-image', 'pdf-to-jpg', 'pdf-to-png', 'pdf-to-webp' => $this->processPdfToImage($request, $tool, $pdfToImageService),
+    'word-to-pdf' => $this->processWordToPdf($request, $tool, $wordToPdfService),
+    'pdf-to-word' => $this->processPdfToWord($request, $tool, $pdfToWordService),
     default => response()->json([
         'message' => 'This tool API is coming next.',
     ], 422),
@@ -426,7 +433,7 @@ return response()->json([
 
         Storage::disk('local')->makeDirectory("file_jobs/{$uuid}/output");
 
-        $imageToPdfService->convert($inputAbsolutePaths, $outputAbsolutePath);
+        $conversionResult = $imageToPdfService->convert($inputAbsolutePaths, $outputAbsolutePath);
 
         $outputSize = filesize($outputAbsolutePath) ?: 0;
 
@@ -463,16 +470,19 @@ return response()->json([
             'finished_at' => now(),
         ]);
 
-        return response()->json([
-            'uuid' => $job->uuid,
-            'status' => 'completed',
-            'tool_slug' => $tool->slug,
-            'message' => 'Your images were converted to PDF successfully.',
-            'download_url' => url("/api/v1/downloads/{$plainToken}"),
-            'input_size_bytes' => $totalInputSize,
-            'output_size_bytes' => $outputSize,
-            'error_message' => null,
-        ]);
+     return response()->json([
+    'uuid' => $job->uuid,
+    'status' => 'completed',
+    'tool_slug' => $tool->slug,
+    'message' => 'Your images were converted to PDF successfully.',
+    'download_url' => url("/api/v1/downloads/{$plainToken}"),
+    'input_size_bytes' => $totalInputSize,
+    'output_size_bytes' => $outputSize,
+    'output_file_count' => $conversionResult['output_file_count'],
+    'page_count' => $conversionResult['page_count'],
+    'input_file_count' => $conversionResult['input_file_count'],
+    'error_message' => null,
+]);
     } catch (Throwable $e) {
         $job->update([
             'status' => 'failed',
@@ -1234,6 +1244,288 @@ private function processPdfToImage(
     }
 }
 
+
+private function processWordToPdf(
+    Request $request,
+    Tool $tool,
+    WordToPdfService $wordToPdfService
+): JsonResponse {
+    $maxKb = ((int) ($tool->max_file_size_mb ?? 25)) * 1024;
+
+    $request->validate([
+        'files' => ['required', 'array', 'size:1'],
+        'files.*' => ['required', 'file', 'mimes:doc,docx,odt,rtf', 'max:' . $maxKb],
+        'settings' => ['nullable', 'string'],
+    ]);
+
+    $settings = $this->decodeSettings($request->input('settings'));
+
+    $uploadedFile = $request->file('files')[0];
+    $uuid = (string) Str::uuid();
+
+    $job = FileJob::query()->create([
+        'uuid' => $uuid,
+        'job_uuid' => $uuid,
+        'tool_id' => $tool->id,
+        'status' => 'processing',
+        'priority' => 0,
+        'input_file_count' => 1,
+        'output_file_count' => 0,
+        'total_input_size_bytes' => 0,
+        'total_output_size_bytes' => 0,
+        'settings' => $settings,
+        'ip_address' => $request->ip(),
+        'user_agent' => substr((string) $request->userAgent(), 0, 500),
+        'started_at' => now(),
+        'expires_at' => now()->addHour(),
+    ]);
+
+    try {
+        $extension = strtolower($uploadedFile->getClientOriginalExtension() ?: 'docx');
+        $inputStoredName = 'input-' . Str::random(16) . '.' . $extension;
+
+        $inputRelativePath = $uploadedFile->storeAs(
+            "file_jobs/{$uuid}/input",
+            $inputStoredName,
+            'local'
+        );
+
+        $inputAbsolutePath = Storage::disk('local')->path($inputRelativePath);
+        $inputSize = (int) $uploadedFile->getSize();
+
+        FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'input',
+            'original_name' => $uploadedFile->getClientOriginalName(),
+            'stored_name' => $inputStoredName,
+            'mime_type' => $uploadedFile->getClientMimeType() ?: 'application/octet-stream',
+            'extension' => $extension,
+            'size_bytes' => $inputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $inputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $inputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $outputStoredName = 'filegrip-word-to-pdf-' . now()->format('Ymd-His') . '.pdf';
+        $outputRelativePath = "file_jobs/{$uuid}/output/{$outputStoredName}";
+        $outputAbsolutePath = Storage::disk('local')->path($outputRelativePath);
+
+        Storage::disk('local')->makeDirectory("file_jobs/{$uuid}/output");
+
+        $conversionResult = $wordToPdfService->convert(
+            $inputAbsolutePath,
+            $outputAbsolutePath
+        );
+
+        $outputSize = filesize($outputAbsolutePath) ?: 0;
+
+        $outputFile = FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'output',
+            'original_name' => 'filegrip-word-to-pdf.pdf',
+            'stored_name' => $outputStoredName,
+            'mime_type' => 'application/pdf',
+            'extension' => 'pdf',
+            'size_bytes' => $outputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $outputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $outputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $plainToken = Str::random(72);
+
+        DownloadToken::query()->create([
+            'file_job_file_id' => $outputFile->id,
+            'token_hash' => hash('sha256', $plainToken),
+            'download_count' => 0,
+            'max_downloads' => 5,
+            'expires_at' => now()->addHour(),
+            'created_at' => now(),
+        ]);
+
+        $job->update([
+            'status' => 'completed',
+            'output_file_count' => $conversionResult['output_file_count'],
+            'total_input_size_bytes' => $inputSize,
+            'total_output_size_bytes' => $outputSize,
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'completed',
+            'tool_slug' => $tool->slug,
+            'message' => 'Your Word document was converted to PDF successfully.',
+            'download_url' => url("/api/v1/downloads/{$plainToken}"),
+            'input_size_bytes' => $inputSize,
+            'output_size_bytes' => $outputSize,
+            'output_file_count' => $conversionResult['output_file_count'],
+            'input_file_count' => $conversionResult['input_file_count'],
+            'engine' => $conversionResult['engine'],
+            'error_message' => null,
+        ]);
+    } catch (Throwable $e) {
+        $job->update([
+            'status' => 'failed',
+            'error_code' => 'word_to_pdf_failed',
+            'error_message' => $e->getMessage(),
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'failed',
+            'tool_slug' => $tool->slug,
+            'message' => 'Word to PDF conversion failed.',
+            'download_url' => null,
+            'error_message' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+
+private function processPdfToWord(
+    Request $request,
+    Tool $tool,
+    PdfToWordService $pdfToWordService
+): JsonResponse {
+    $maxKb = ((int) ($tool->max_file_size_mb ?? 25)) * 1024;
+
+    $request->validate([
+        'files' => ['required', 'array', 'size:1'],
+        'files.*' => ['required', 'file', 'mimes:pdf', 'max:' . $maxKb],
+        'settings' => ['nullable', 'string'],
+    ]);
+
+    $settings = $this->decodeSettings($request->input('settings'));
+
+    $uploadedFile = $request->file('files')[0];
+    $uuid = (string) Str::uuid();
+
+    $job = FileJob::query()->create([
+        'uuid' => $uuid,
+        'job_uuid' => $uuid,
+        'tool_id' => $tool->id,
+        'status' => 'processing',
+        'priority' => 0,
+        'input_file_count' => 1,
+        'output_file_count' => 0,
+        'total_input_size_bytes' => 0,
+        'total_output_size_bytes' => 0,
+        'settings' => $settings,
+        'ip_address' => $request->ip(),
+        'user_agent' => substr((string) $request->userAgent(), 0, 500),
+        'started_at' => now(),
+        'expires_at' => now()->addHour(),
+    ]);
+
+    try {
+        $extension = strtolower($uploadedFile->getClientOriginalExtension() ?: 'pdf');
+        $inputStoredName = 'input-' . Str::random(16) . '.' . $extension;
+
+        $inputRelativePath = $uploadedFile->storeAs(
+            "file_jobs/{$uuid}/input",
+            $inputStoredName,
+            'local'
+        );
+
+        $inputAbsolutePath = Storage::disk('local')->path($inputRelativePath);
+        $inputSize = (int) $uploadedFile->getSize();
+
+        FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'input',
+            'original_name' => $uploadedFile->getClientOriginalName(),
+            'stored_name' => $inputStoredName,
+            'mime_type' => $uploadedFile->getClientMimeType() ?: 'application/pdf',
+            'extension' => $extension,
+            'size_bytes' => $inputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $inputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $inputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $outputStoredName = 'filegrip-pdf-to-word-' . now()->format('Ymd-His') . '.docx';
+        $outputRelativePath = "file_jobs/{$uuid}/output/{$outputStoredName}";
+        $outputAbsolutePath = Storage::disk('local')->path($outputRelativePath);
+
+        Storage::disk('local')->makeDirectory("file_jobs/{$uuid}/output");
+
+        $conversionResult = $pdfToWordService->convert(
+            $inputAbsolutePath,
+            $outputAbsolutePath
+        );
+
+        $outputSize = filesize($outputAbsolutePath) ?: 0;
+
+        $outputFile = FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'output',
+            'original_name' => 'filegrip-pdf-to-word.docx',
+            'stored_name' => $outputStoredName,
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'extension' => 'docx',
+            'size_bytes' => $outputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $outputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $outputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $plainToken = Str::random(72);
+
+        DownloadToken::query()->create([
+            'file_job_file_id' => $outputFile->id,
+            'token_hash' => hash('sha256', $plainToken),
+            'download_count' => 0,
+            'max_downloads' => 5,
+            'expires_at' => now()->addHour(),
+            'created_at' => now(),
+        ]);
+
+        $job->update([
+            'status' => 'completed',
+            'output_file_count' => $conversionResult['output_file_count'],
+            'total_input_size_bytes' => $inputSize,
+            'total_output_size_bytes' => $outputSize,
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'completed',
+            'tool_slug' => $tool->slug,
+            'message' => 'Your PDF was converted to Word successfully.',
+            'download_url' => url("/api/v1/downloads/{$plainToken}"),
+            'input_size_bytes' => $inputSize,
+            'output_size_bytes' => $outputSize,
+            'output_file_count' => $conversionResult['output_file_count'],
+            'input_file_count' => $conversionResult['input_file_count'],
+            'page_count' => $conversionResult['page_count'],
+            'engine' => $conversionResult['engine'],
+            'error_message' => null,
+        ]);
+    } catch (Throwable $e) {
+        $job->update([
+            'status' => 'failed',
+            'error_code' => 'pdf_to_word_failed',
+            'error_message' => $e->getMessage(),
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'failed',
+            'tool_slug' => $tool->slug,
+            'message' => 'PDF to Word conversion failed.',
+            'download_url' => null,
+            'error_message' => $e->getMessage(),
+        ], 500);
+    }
+}
 
     public function show(string $uuid): JsonResponse
     {

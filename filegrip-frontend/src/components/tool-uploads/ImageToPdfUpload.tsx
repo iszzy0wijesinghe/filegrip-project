@@ -58,12 +58,25 @@ function createFileId(file: File) {
   return `${file.name}-${file.size}-${file.lastModified}-${Date.now()}-${Math.random()}`;
 }
 
+function isSupportedImage(file: File) {
+  const name = file.name.toLowerCase();
+
+  return (
+    file.type.startsWith("image/") ||
+    name.endsWith(".jpg") ||
+    name.endsWith(".jpeg") ||
+    name.endsWith(".png") ||
+    name.endsWith(".webp")
+  );
+}
+
 export default function ImageToPdfUpload({
   toolSlug,
   inputTypes,
   maxFileSizeMb = 25,
 }: ImageToPdfUploadProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const resultRef = useRef<HTMLDivElement | null>(null);
 
   const [selectedFiles, setSelectedFiles] = useState<SelectedImageFile[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -79,15 +92,27 @@ export default function ImageToPdfUpload({
     variant: "compress",
   });
 
-  const acceptedTypes = inputTypes
-    ?.map((type) => `.${type.toLowerCase()}`)
-    .join(",");
+  const acceptedTypes =
+    inputTypes && inputTypes.length > 0
+      ? inputTypes.map((type) => `.${type.toLowerCase()}`).join(",")
+      : ".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp";
 
   useEffect(() => {
     return () => {
       selectedFiles.forEach((item) => URL.revokeObjectURL(item.previewUrl));
     };
   }, [selectedFiles]);
+
+  useEffect(() => {
+    if (!job || isProcessing) return;
+
+    window.setTimeout(() => {
+      resultRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 120);
+  }, [job, isProcessing]);
 
   function closeLimitModal() {
     setLimitModal((current) => ({
@@ -112,7 +137,7 @@ export default function ImageToPdfUpload({
         isOpen: true,
         title: "Hey Homie, this image is too large.",
         message:
-          `"${tooLarge.name}" is bigger than our maximum upload limit. Try our Compress Image tool first, then come back and convert it to PDF.`,
+          `"${tooLarge.name}" is bigger than our maximum upload limit. Try compressing the image first, then come back and convert it to PDF.`,
         actionLabel: "Compress Image",
         actionHref: "/tools/compress-image",
         variant: "compress",
@@ -125,12 +150,10 @@ export default function ImageToPdfUpload({
       return;
     }
 
-    const imageError = incomingFiles.find(
-      (file) => !file.type.startsWith("image/"),
-    );
+    const imageError = incomingFiles.find((file) => !isSupportedImage(file));
 
     if (imageError) {
-      setError("This tool only accepts image files.");
+      setError("Image to PDF only accepts JPG, PNG, and WEBP image files.");
       return;
     }
 
@@ -225,7 +248,7 @@ export default function ImageToPdfUpload({
     try {
       const [result] = await Promise.all([
         createFileJob({
-          toolSlug,
+          toolSlug: "image-to-pdf",
           files: selectedFiles.map((item) => item.file),
           settings: {
             order: selectedFiles.map((item, index) => ({
@@ -256,15 +279,16 @@ export default function ImageToPdfUpload({
           Add images to convert
         </h2>
 
-        <p className="mt-3 text-sm leading-6 text-[#78716C] dark:text-white/60">
-          Add JPG or PNG files. Drag to reorder before creating the PDF.
+        <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-[#78716C] dark:text-white/60">
+          Upload JPG, PNG, or WEBP images. Drag to reorder them, then FileGrip
+          will create one clean PDF with each image as a page.
         </p>
 
         <input
           ref={inputRef}
           type="file"
           multiple
-          accept={acceptedTypes || "image/*"}
+          accept={acceptedTypes}
           className="hidden"
           onChange={(event) => handleFiles(event.target.files)}
         />
@@ -279,7 +303,8 @@ export default function ImageToPdfUpload({
         </button>
 
         <p className="mt-4 text-xs font-medium text-[#78716C] dark:text-white/45">
-          Max file size: {maxFileSizeMb ?? 25} MB each
+          JPG, PNG, WEBP supported · Max file size: {maxFileSizeMb ?? 25} MB
+          each
         </p>
       </div>
 
@@ -288,11 +313,11 @@ export default function ImageToPdfUpload({
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div>
               <p className="text-sm font-black text-[#111827] dark:text-white">
-                Image order
+                PDF page order
               </p>
               <p className="mt-1 text-xs font-medium text-[#78716C] dark:text-white/45">
-                {selectedFiles.length} images selected. Drag cards to change
-                order.
+                {selectedFiles.length} images selected. Each image becomes one
+                PDF page.
               </p>
             </div>
 
@@ -336,7 +361,7 @@ export default function ImageToPdfUpload({
               >
                 <div className="relative overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-white/10 dark:bg-[#080B10]">
                   <div className="absolute left-3 top-3 z-10 rounded-full bg-[#F97316] px-2.5 py-1 text-xs font-black text-white shadow-lg">
-                    {index + 1}
+                    Page {index + 1}
                   </div>
 
                   {!isProcessing && !job && (
@@ -373,9 +398,16 @@ export default function ImageToPdfUpload({
                     <p className="truncate text-sm font-black text-[#111827] dark:text-white">
                       {item.file.name}
                     </p>
-                    <p className="mt-1 text-xs font-medium text-[#78716C] dark:text-white/45">
-                      {formatFileSize(item.file.size)}
-                    </p>
+
+                    <div className="mt-1 flex flex-wrap gap-2 text-xs font-medium text-[#78716C] dark:text-white/45">
+                      <span>{formatFileSize(item.file.size)}</span>
+                      <span>•</span>
+                      <span>
+                        {item.file.type
+                          ? item.file.type.replace("image/", "").toUpperCase()
+                          : "IMAGE"}
+                      </span>
+                    </div>
 
                     {!isProcessing && !job && (
                       <div className="mt-3 flex gap-2 sm:hidden">
@@ -407,17 +439,19 @@ export default function ImageToPdfUpload({
           {isProcessing && (
             <ToolProcessingPanel
               title="Converting images to PDF"
-              subtitle="FileGrip is placing your images into a PDF in the exact order shown above."
+              subtitle="FileGrip is placing your images into one PDF in the exact order shown above."
             />
           )}
 
           {job && (
-            <ToolResultCard
-              job={job}
-              downloadLabel="Download PDF"
-              resetLabel="Convert another image set"
-              onReset={clearFiles}
-            />
+            <div ref={resultRef}>
+              <ToolResultCard
+                job={job}
+                downloadLabel="Download PDF"
+                resetLabel="Convert another image set"
+                onReset={clearFiles}
+              />
+            </div>
           )}
 
           {!job && (
@@ -435,7 +469,8 @@ export default function ImageToPdfUpload({
               ) : (
                 <>
                   <FileImage size={18} />
-                  Convert {selectedFiles.length} Images to PDF
+                  Convert {selectedFiles.length}{" "}
+                  {selectedFiles.length === 1 ? "Image" : "Images"} to PDF
                 </>
               )}
             </button>

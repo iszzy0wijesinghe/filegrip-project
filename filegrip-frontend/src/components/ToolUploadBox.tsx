@@ -12,6 +12,8 @@ import RotatePdfUpload from "./tool-uploads/RotatePdfUpload";
 import DeletePdfPagesUpload from "./tool-uploads/DeletePdfPagesUpload";
 import ReorderPdfPagesUpload from "./tool-uploads/ReorderPdfPagesUpload";
 import PdfToImageUpload from "./tool-uploads/PdfToImageUpload";
+import WordToPdfUpload from "./tool-uploads/WordToPdfUpload";
+import PdfToWordUpload from "./tool-uploads/PdfToWordUpload";
 
 type ToolUploadBoxProps = {
   toolSlug: string;
@@ -37,6 +39,7 @@ export default function ToolUploadBox({
   if (
     toolSlug === "jpg-to-pdf" ||
     toolSlug === "png-to-pdf" ||
+    toolSlug === "webp-to-pdf" ||
     toolSlug === "image-to-pdf"
   ) {
     return (
@@ -89,13 +92,33 @@ export default function ToolUploadBox({
   }
 
   if (
-  toolSlug === "pdf-to-image" ||
-  toolSlug === "pdf-to-jpg" ||
-  toolSlug === "pdf-to-png" ||
-  toolSlug === "pdf-to-webp"
-) {
+    toolSlug === "pdf-to-image" ||
+    toolSlug === "pdf-to-jpg" ||
+    toolSlug === "pdf-to-png" ||
+    toolSlug === "pdf-to-webp"
+  ) {
+    return (
+      <PdfToImageUpload
+        toolSlug={toolSlug}
+        inputTypes={inputTypes}
+        maxFileSizeMb={maxFileSizeMb}
+      />
+    );
+  }
+
+  if (toolSlug === "word-to-pdf") {
   return (
-    <PdfToImageUpload
+    <WordToPdfUpload
+      toolSlug={toolSlug}
+      inputTypes={inputTypes}
+      maxFileSizeMb={maxFileSizeMb}
+    />
+  );
+}
+
+if (toolSlug === "pdf-to-word") {
+  return (
+    <PdfToWordUpload
       toolSlug={toolSlug}
       inputTypes={inputTypes}
       maxFileSizeMb={maxFileSizeMb}
