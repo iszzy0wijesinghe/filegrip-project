@@ -1,3 +1,4 @@
+/** @format */
 
 "use client";
 
@@ -9,6 +10,8 @@ import ImageToPdfUpload from "./tool-uploads/ImageToPdfUpload";
 import SplitPdfUpload from "./tool-uploads/SplitPdfUpload";
 import RotatePdfUpload from "./tool-uploads/RotatePdfUpload";
 import DeletePdfPagesUpload from "./tool-uploads/DeletePdfPagesUpload";
+import ReorderPdfPagesUpload from "./tool-uploads/ReorderPdfPagesUpload";
+import PdfToImageUpload from "./tool-uploads/PdfToImageUpload";
 
 type ToolUploadBoxProps = {
   toolSlug: string;
@@ -46,28 +49,53 @@ export default function ToolUploadBox({
   }
 
   if (toolSlug === "split-pdf") {
-  return (
-    <SplitPdfUpload
-      toolSlug={toolSlug}
-      inputTypes={inputTypes}
-      maxFileSizeMb={maxFileSizeMb}
-    />
-  );
-}
+    return (
+      <SplitPdfUpload
+        toolSlug={toolSlug}
+        inputTypes={inputTypes}
+        maxFileSizeMb={maxFileSizeMb}
+      />
+    );
+  }
 
-if (toolSlug === "rotate-pdf") {
-  return (
-    <RotatePdfUpload
-      toolSlug={toolSlug}
-      inputTypes={inputTypes}
-      maxFileSizeMb={maxFileSizeMb}
-    />
-  );
-}
+  if (toolSlug === "rotate-pdf") {
+    return (
+      <RotatePdfUpload
+        toolSlug={toolSlug}
+        inputTypes={inputTypes}
+        maxFileSizeMb={maxFileSizeMb}
+      />
+    );
+  }
 
-if (toolSlug === "delete-pdf-pages") {
+  if (toolSlug === "delete-pdf-pages") {
+    return (
+      <DeletePdfPagesUpload
+        toolSlug={toolSlug}
+        inputTypes={inputTypes}
+        maxFileSizeMb={maxFileSizeMb}
+      />
+    );
+  }
+
+  if (toolSlug === "reorder-pdf-pages") {
+    return (
+      <ReorderPdfPagesUpload
+        toolSlug={toolSlug}
+        inputTypes={inputTypes}
+        maxFileSizeMb={maxFileSizeMb}
+      />
+    );
+  }
+
+  if (
+  toolSlug === "pdf-to-image" ||
+  toolSlug === "pdf-to-jpg" ||
+  toolSlug === "pdf-to-png" ||
+  toolSlug === "pdf-to-webp"
+) {
   return (
-    <DeletePdfPagesUpload
+    <PdfToImageUpload
       toolSlug={toolSlug}
       inputTypes={inputTypes}
       maxFileSizeMb={maxFileSizeMb}

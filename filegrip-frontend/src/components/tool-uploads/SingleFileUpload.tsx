@@ -3,16 +3,11 @@
 /** @format */
 
 import { useEffect, useRef, useState } from "react";
-import {
-  AlertCircle,
-  FileText,
-  Loader2,
-  Upload,
-  X,
-} from "lucide-react";
+import { AlertCircle, FileText, Loader2, Upload, X } from "lucide-react";
 import { createFileJob, FileJobResponse } from "../../lib/fileJobsApi";
 import ToolProcessingPanel from "./ToolProcessingPanel";
 import ToolResultCard from "./ToolResultCard";
+import ToolLimitModal from "./ToolLimitModal";
 
 type SingleFileUploadProps = {
   toolSlug: string;
@@ -25,6 +20,15 @@ type FilePreview = {
   pageCount: number | null;
   isPdf: boolean;
   isImage: boolean;
+};
+
+type LimitModalState = {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  actionLabel: string;
+  actionHref: string;
+  variant: "compress" | "split";
 };
 
 function formatFileSize(bytes?: number | null) {
@@ -212,6 +216,14 @@ export default function SingleFileUpload({
   const [isProcessing, setIsProcessing] = useState(false);
   const [job, setJob] = useState<FileJobResponse | null>(null);
   const [error, setError] = useState("");
+  const [limitModal, setLimitModal] = useState<LimitModalState>({
+    isOpen: false,
+    title: "",
+    message: "",
+    actionLabel: "",
+    actionHref: "",
+    variant: "compress",
+  });
 
   const acceptedTypes = inputTypes
     ?.map((type) => `.${type.toLowerCase()}`)
@@ -227,6 +239,70 @@ export default function SingleFileUpload({
     };
   }, [preview.previewUrl]);
 
+  function closeLimitModal() {
+    setLimitModal((current) => ({
+      ...current,
+      isOpen: false,
+    }));
+  }
+
+  function showLargeFileModal(file: File) {
+    const isPdf =
+      file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf");
+
+    const isImage = file.type.startsWith("image/");
+
+    if (toolSlug === "compress-pdf") {
+      setLimitModal({
+        isOpen: true,
+        title: "Hey Homie, this PDF is too large.",
+        message:
+          "This file is bigger than our current upload limit for Compress PDF. Split it into smaller parts first, then compress each part.",
+        actionLabel: "Split PDF",
+        actionHref: "/tools/split-pdf",
+        variant: "split",
+      });
+      return;
+    }
+
+    if (isPdf) {
+      setLimitModal({
+        isOpen: true,
+        title: "Hey Homie, mmm... this file is too large.",
+        message:
+          "Your file is bigger than our maximum upload limit. Try our Compress PDF tool to reduce the file size, then come back and retry.",
+        actionLabel: "Compress PDF",
+        actionHref: "/tools/compress-pdf",
+        variant: "compress",
+      });
+      return;
+    }
+
+    if (isImage) {
+      setLimitModal({
+        isOpen: true,
+        title: "Hey Homie, this image is too large.",
+        message:
+          "Your image is bigger than our maximum upload limit. Try compressing the image first, then come back and retry.",
+        actionLabel: "Compress Image",
+        actionHref: "/tools/compress-image",
+        variant: "compress",
+      });
+      return;
+    }
+
+    setLimitModal({
+      isOpen: true,
+      title: "Hey Homie, this file is too large.",
+      message:
+        "Your file is bigger than our maximum upload limit. Try reducing the file size, then upload it again.",
+      actionLabel: "Try Compress PDF",
+      actionHref: "/tools/compress-pdf",
+      variant: "compress",
+    });
+  }
+
   async function handleFile(file: File | null) {
     setError("");
     setJob(null);
@@ -236,7 +312,12 @@ export default function SingleFileUpload({
     const maxBytes = (maxFileSizeMb ?? 25) * 1024 * 1024;
 
     if (file.size > maxBytes) {
-      setError(`"${file.name}" is larger than ${maxFileSizeMb} MB.`);
+      showLargeFileModal(file);
+
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+
       return;
     }
 
@@ -544,6 +625,16 @@ export default function SingleFileUpload({
           {error}
         </div>
       )}
+
+      <ToolLimitModal
+        isOpen={limitModal.isOpen}
+        title={limitModal.title}
+        message={limitModal.message}
+        actionLabel={limitModal.actionLabel}
+        actionHref={limitModal.actionHref}
+        variant={limitModal.variant}
+        onClose={closeLimitModal}
+      />
     </div>
   );
 }

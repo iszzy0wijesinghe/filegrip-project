@@ -7,12 +7,14 @@ use App\Services\FileTools\ImageToPdfService;
 use App\Services\FileTools\PdfSplitService;
 use App\Services\FileTools\PdfRotateService;
 use App\Services\FileTools\PdfDeletePagesService;
+use App\Services\FileTools\PdfToImageService;
 use App\Models\DownloadToken;
 use App\Models\FileJob;
 use App\Models\FileJobFile;
 use App\Models\Tool;
 use App\Services\FileTools\PdfCompressService;
 use App\Services\FileTools\PdfMergeService;
+use App\Services\FileTools\PdfReorderPagesService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -29,7 +31,9 @@ class FileJobController extends Controller
         ImageToPdfService $imageToPdfService,
         PdfSplitService $pdfSplitService,
         PdfRotateService $pdfRotateService,
-        PdfDeletePagesService $pdfDeletePagesService
+        PdfDeletePagesService $pdfDeletePagesService,
+        PdfReorderPagesService $pdfReorderPagesService,
+        PdfToImageService $pdfToImageService
     ): JsonResponse {
         $tool = Tool::query()
             ->where('slug', $slug)
@@ -48,7 +52,9 @@ class FileJobController extends Controller
     'split-pdf' => $this->processSplitPdf($request, $tool, $pdfSplitService),
     'rotate-pdf' => $this->processRotatePdf($request, $tool, $pdfRotateService),
     'delete-pdf-pages' => $this->processDeletePdfPages($request, $tool, $pdfDeletePagesService),
+    'reorder-pdf-pages' => $this->processReorderPdfPages($request, $tool, $pdfReorderPagesService),
     'jpg-to-pdf', 'png-to-pdf', 'image-to-pdf' => $this->processImageToPdf($request, $tool, $imageToPdfService),
+'pdf-to-image', 'pdf-to-jpg', 'pdf-to-png', 'pdf-to-webp' => $this->processPdfToImage($request, $tool, $pdfToImageService),
     default => response()->json([
         'message' => 'This tool API is coming next.',
     ], 422),
@@ -924,6 +930,310 @@ private function processDeletePdfPages(
         ], 500);
     }
 }
+
+private function processReorderPdfPages(
+    Request $request,
+    Tool $tool,
+    PdfReorderPagesService $pdfReorderPagesService
+): JsonResponse {
+    $maxKb = ((int) ($tool->max_file_size_mb ?? 25)) * 1024;
+
+    $request->validate([
+        'files' => ['required', 'array', 'size:1'],
+        'files.*' => ['required', 'file', 'mimes:pdf', 'max:' . $maxKb],
+        'settings' => ['nullable', 'string'],
+    ]);
+
+    $settings = $this->decodeSettings($request->input('settings'));
+    $pageOrderText = trim((string) ($settings['page_order'] ?? ''));
+
+    if ($pageOrderText === '') {
+        return response()->json([
+            'message' => 'Please reorder at least one page first.',
+        ], 422);
+    }
+
+    $uploadedFile = $request->file('files')[0];
+    $uuid = (string) Str::uuid();
+
+    $job = FileJob::query()->create([
+        'uuid' => $uuid,
+        'job_uuid' => $uuid,
+        'tool_id' => $tool->id,
+        'status' => 'processing',
+        'priority' => 0,
+        'input_file_count' => 1,
+        'output_file_count' => 0,
+        'total_input_size_bytes' => 0,
+        'total_output_size_bytes' => 0,
+        'settings' => $settings,
+        'ip_address' => $request->ip(),
+        'user_agent' => substr((string) $request->userAgent(), 0, 500),
+        'started_at' => now(),
+        'expires_at' => now()->addHour(),
+    ]);
+
+    try {
+        $extension = strtolower($uploadedFile->getClientOriginalExtension() ?: 'pdf');
+        $inputStoredName = 'input-' . Str::random(16) . '.' . $extension;
+
+        $inputRelativePath = $uploadedFile->storeAs(
+            "file_jobs/{$uuid}/input",
+            $inputStoredName,
+            'local'
+        );
+
+        $inputAbsolutePath = Storage::disk('local')->path($inputRelativePath);
+        $inputSize = (int) $uploadedFile->getSize();
+
+        FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'input',
+            'original_name' => $uploadedFile->getClientOriginalName(),
+            'stored_name' => $inputStoredName,
+            'mime_type' => $uploadedFile->getClientMimeType() ?: 'application/pdf',
+            'extension' => $extension,
+            'size_bytes' => $inputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $inputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $inputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $outputStoredName = 'filegrip-reordered-' . now()->format('Ymd-His') . '.pdf';
+        $outputRelativePath = "file_jobs/{$uuid}/output/{$outputStoredName}";
+        $outputAbsolutePath = Storage::disk('local')->path($outputRelativePath);
+
+        Storage::disk('local')->makeDirectory("file_jobs/{$uuid}/output");
+
+        $reorderResult = $pdfReorderPagesService->reorder(
+            $inputAbsolutePath,
+            $outputAbsolutePath,
+            $pageOrderText
+        );
+
+        $outputSize = filesize($outputAbsolutePath) ?: 0;
+
+        $outputFile = FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'output',
+            'original_name' => 'filegrip-reordered.pdf',
+            'stored_name' => $outputStoredName,
+            'mime_type' => 'application/pdf',
+            'extension' => 'pdf',
+            'size_bytes' => $outputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $outputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $outputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $plainToken = Str::random(72);
+
+        DownloadToken::query()->create([
+            'file_job_file_id' => $outputFile->id,
+            'token_hash' => hash('sha256', $plainToken),
+            'download_count' => 0,
+            'max_downloads' => 5,
+            'expires_at' => now()->addHour(),
+            'created_at' => now(),
+        ]);
+
+        $job->update([
+            'status' => 'completed',
+            'output_file_count' => 1,
+            'total_input_size_bytes' => $inputSize,
+            'total_output_size_bytes' => $outputSize,
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'completed',
+            'tool_slug' => $tool->slug,
+            'message' => 'Your PDF pages were reordered successfully.',
+            'download_url' => url("/api/v1/downloads/{$plainToken}"),
+            'input_size_bytes' => $inputSize,
+            'output_size_bytes' => $outputSize,
+            'page_count' => $reorderResult['page_count'],
+            'page_order' => $reorderResult['page_order'],
+            'page_order_text' => $reorderResult['page_order_text'],
+            'error_message' => null,
+        ]);
+    } catch (Throwable $e) {
+        $job->update([
+            'status' => 'failed',
+            'error_code' => 'reorder_pdf_pages_failed',
+            'error_message' => $e->getMessage(),
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'failed',
+            'tool_slug' => $tool->slug,
+            'message' => 'PDF page reorder failed.',
+            'download_url' => null,
+            'error_message' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+private function processPdfToImage(
+    Request $request,
+    Tool $tool,
+    PdfToImageService $pdfToImageService
+): JsonResponse {
+    $maxKb = ((int) ($tool->max_file_size_mb ?? 25)) * 1024;
+
+    $request->validate([
+        'files' => ['required', 'array', 'size:1'],
+        'files.*' => ['required', 'file', 'mimes:pdf', 'max:' . $maxKb],
+        'settings' => ['nullable', 'string'],
+    ]);
+
+    $settings = $this->decodeSettings($request->input('settings'));
+
+    $outputFormat = strtolower((string) ($settings['output_format'] ?? 'jpg'));
+
+    if (! in_array($outputFormat, ['jpg', 'png', 'webp'], true)) {
+        return response()->json([
+            'message' => 'Please choose a valid output image format.',
+        ], 422);
+    }
+
+    $uploadedFile = $request->file('files')[0];
+    $uuid = (string) Str::uuid();
+
+    $job = FileJob::query()->create([
+        'uuid' => $uuid,
+        'job_uuid' => $uuid,
+        'tool_id' => $tool->id,
+        'status' => 'processing',
+        'priority' => 0,
+        'input_file_count' => 1,
+        'output_file_count' => 0,
+        'total_input_size_bytes' => 0,
+        'total_output_size_bytes' => 0,
+        'settings' => $settings,
+        'ip_address' => $request->ip(),
+        'user_agent' => substr((string) $request->userAgent(), 0, 500),
+        'started_at' => now(),
+        'expires_at' => now()->addHour(),
+    ]);
+
+    try {
+        $extension = strtolower($uploadedFile->getClientOriginalExtension() ?: 'pdf');
+        $inputStoredName = 'input-' . Str::random(16) . '.' . $extension;
+
+        $inputRelativePath = $uploadedFile->storeAs(
+            "file_jobs/{$uuid}/input",
+            $inputStoredName,
+            'local'
+        );
+
+        $inputAbsolutePath = Storage::disk('local')->path($inputRelativePath);
+        $inputSize = (int) $uploadedFile->getSize();
+
+        FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'input',
+            'original_name' => $uploadedFile->getClientOriginalName(),
+            'stored_name' => $inputStoredName,
+            'mime_type' => $uploadedFile->getClientMimeType() ?: 'application/pdf',
+            'extension' => $extension,
+            'size_bytes' => $inputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $inputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $inputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $outputFolderRelativePath = "file_jobs/{$uuid}/output/images";
+        $outputFolderAbsolutePath = Storage::disk('local')->path($outputFolderRelativePath);
+
+        $zipStoredName = 'filegrip-pdf-to-' . $outputFormat . '-' . now()->format('Ymd-His') . '.zip';
+        $zipRelativePath = "file_jobs/{$uuid}/output/{$zipStoredName}";
+        $zipAbsolutePath = Storage::disk('local')->path($zipRelativePath);
+
+        Storage::disk('local')->makeDirectory("file_jobs/{$uuid}/output");
+        Storage::disk('local')->makeDirectory($outputFolderRelativePath);
+
+        $conversionResult = $pdfToImageService->convertToZip(
+            $inputAbsolutePath,
+            $outputFolderAbsolutePath,
+            $zipAbsolutePath,
+            $outputFormat
+        );
+
+        $outputSize = filesize($zipAbsolutePath) ?: 0;
+
+        $outputFile = FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'output',
+            'original_name' => 'filegrip-pdf-to-' . $outputFormat . '.zip',
+            'stored_name' => $zipStoredName,
+            'mime_type' => 'application/zip',
+            'extension' => 'zip',
+            'size_bytes' => $outputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $zipRelativePath,
+            'checksum_sha256' => hash_file('sha256', $zipAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $plainToken = Str::random(72);
+
+        DownloadToken::query()->create([
+            'file_job_file_id' => $outputFile->id,
+            'token_hash' => hash('sha256', $plainToken),
+            'download_count' => 0,
+            'max_downloads' => 5,
+            'expires_at' => now()->addHour(),
+            'created_at' => now(),
+        ]);
+
+        $job->update([
+            'status' => 'completed',
+            'output_file_count' => $conversionResult['output_file_count'],
+            'total_input_size_bytes' => $inputSize,
+            'total_output_size_bytes' => $outputSize,
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'completed',
+            'tool_slug' => $tool->slug,
+            'message' => 'Your PDF was converted to images successfully.',
+            'download_url' => url("/api/v1/downloads/{$plainToken}"),
+            'input_size_bytes' => $inputSize,
+            'output_size_bytes' => $outputSize,
+            'output_file_count' => $conversionResult['output_file_count'],
+            'download_type' => 'zip',
+            'output_format' => $outputFormat,
+            'page_count' => $conversionResult['page_count'],
+            'error_message' => null,
+        ]);
+    } catch (Throwable $e) {
+        $job->update([
+            'status' => 'failed',
+            'error_code' => 'pdf_to_image_failed',
+            'error_message' => $e->getMessage(),
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'failed',
+            'tool_slug' => $tool->slug,
+            'message' => 'PDF to image conversion failed.',
+            'download_url' => null,
+            'error_message' => $e->getMessage(),
+        ], 500);
+    }
+}
+
 
     public function show(string $uuid): JsonResponse
     {

@@ -15,6 +15,7 @@ import {
 import { createFileJob, FileJobResponse } from "../../lib/fileJobsApi";
 import ToolProcessingPanel from "./ToolProcessingPanel";
 import ToolResultCard from "./ToolResultCard";
+import ToolLimitModal from "./ToolLimitModal";
 
 type MergePdfUploadProps = {
   toolSlug: string;
@@ -26,6 +27,15 @@ type SelectedPdfFile = {
   id: string;
   file: File;
   previewUrl: string | null;
+};
+
+type LimitModalState = {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  actionLabel: string;
+  actionHref: string;
+  variant: "compress" | "split";
 };
 
 function formatFileSize(bytes: number) {
@@ -98,6 +108,14 @@ export default function MergePdfUpload({
   const [isProcessing, setIsProcessing] = useState(false);
   const [job, setJob] = useState<FileJobResponse | null>(null);
   const [error, setError] = useState("");
+  const [limitModal, setLimitModal] = useState<LimitModalState>({
+    isOpen: false,
+    title: "",
+    message: "",
+    actionLabel: "",
+    actionHref: "",
+    variant: "compress",
+  });
 
   const acceptedTypes = inputTypes
     ?.map((type) => `.${type.toLowerCase()}`)
@@ -113,6 +131,13 @@ export default function MergePdfUpload({
     };
   }, [selectedFiles]);
 
+  function closeLimitModal() {
+    setLimitModal((current) => ({
+      ...current,
+      isOpen: false,
+    }));
+  }
+
   async function handleFiles(files: FileList | null) {
     setError("");
     setJob(null);
@@ -125,7 +150,20 @@ export default function MergePdfUpload({
     const tooLarge = incomingFiles.find((file) => file.size > maxBytes);
 
     if (tooLarge) {
-      setError(`"${tooLarge.name}" is larger than ${maxFileSizeMb} MB.`);
+      setLimitModal({
+        isOpen: true,
+        title: "Hey Homie, mmm... one PDF is too large.",
+        message:
+          `"${tooLarge.name}" is bigger than our maximum upload limit. Try our Compress PDF tool to reduce the file size, then come back and merge it.`,
+        actionLabel: "Compress PDF",
+        actionHref: "/tools/compress-pdf",
+        variant: "compress",
+      });
+
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+
       return;
     }
 
@@ -480,6 +518,16 @@ export default function MergePdfUpload({
           {error}
         </div>
       )}
+
+      <ToolLimitModal
+        isOpen={limitModal.isOpen}
+        title={limitModal.title}
+        message={limitModal.message}
+        actionLabel={limitModal.actionLabel}
+        actionHref={limitModal.actionHref}
+        variant={limitModal.variant}
+        onClose={closeLimitModal}
+      />
     </div>
   );
 }

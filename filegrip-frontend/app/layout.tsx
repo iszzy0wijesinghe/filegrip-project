@@ -40,13 +40,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className="h-full overflow-hidden bg-[#FFF7ED] dark:bg-[#080B10]"
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body>
+
+      <body className="h-full overflow-hidden bg-[#FFF7ED] text-[#111827] antialiased dark:bg-[#080B10] dark:text-white">
         <AppStartLoader />
-        {children}
+
+        <div className="filegrip-scroll-root">{children}</div>
       </body>
     </html>
   );

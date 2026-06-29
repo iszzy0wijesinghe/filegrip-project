@@ -1,5 +1,3 @@
-/** @format */
-
 "use client";
 
 /** @format */
@@ -19,6 +17,7 @@ import {
 import { createFileJob, FileJobResponse } from "../../lib/fileJobsApi";
 import ToolProcessingPanel from "./ToolProcessingPanel";
 import ToolResultCard from "./ToolResultCard";
+import ToolLimitModal from "./ToolLimitModal";
 
 type SplitPdfUploadProps = {
   toolSlug: string;
@@ -40,6 +39,15 @@ type PageRange = {
   start: number;
   end: number;
   source: "manual" | "auto";
+};
+
+type LimitModalState = {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  actionLabel: string;
+  actionHref: string;
+  variant: "compress" | "split";
 };
 
 function formatFileSize(bytes?: number | null) {
@@ -68,14 +76,6 @@ function rangeToText(range: PageRange) {
   return range.start === range.end
     ? `${range.start}`
     : `${range.start}-${range.end}`;
-}
-
-function getRangeLabel(range: PageRange) {
-  if (range.source === "auto") {
-    return `Remaining pages ${rangeToText(range)}`;
-  }
-
-  return `Pages ${rangeToText(range)}`;
 }
 
 async function createPdfPreview(file: File): Promise<FilePreview> {
@@ -191,6 +191,14 @@ export default function SplitPdfUpload({
   const [isProcessing, setIsProcessing] = useState(false);
   const [job, setJob] = useState<FileJobResponse | null>(null);
   const [error, setError] = useState("");
+  const [limitModal, setLimitModal] = useState<LimitModalState>({
+    isOpen: false,
+    title: "",
+    message: "",
+    actionLabel: "",
+    actionHref: "",
+    variant: "compress",
+  });
 
   const acceptedTypes = inputTypes
     ?.map((type) => `.${type.toLowerCase()}`)
@@ -270,6 +278,13 @@ export default function SplitPdfUpload({
     };
   }, [preview.previewUrl]);
 
+  function closeLimitModal() {
+    setLimitModal((current) => ({
+      ...current,
+      isOpen: false,
+    }));
+  }
+
   async function handleFile(file: File | null) {
     setError("");
     setJob(null);
@@ -279,7 +294,20 @@ export default function SplitPdfUpload({
     const maxBytes = (maxFileSizeMb ?? 25) * 1024 * 1024;
 
     if (file.size > maxBytes) {
-      setError(`"${file.name}" is larger than ${maxFileSizeMb} MB.`);
+      setLimitModal({
+        isOpen: true,
+        title: "Hey Homie, mmm... this file is too large.",
+        message:
+          "Your PDF is bigger than our maximum upload limit. Try our Compress PDF tool to reduce the file size, then come back and split it.",
+        actionLabel: "Compress PDF",
+        actionHref: "/tools/compress-pdf",
+        variant: "compress",
+      });
+
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+
       return;
     }
 
@@ -484,7 +512,8 @@ export default function SplitPdfUpload({
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          className="mt-5 inline-flex items-center justify-center gap-2 rounded-full bg-[#111827] px-7 py-3 text-sm font-black text-white transition hover:-translate-y-0.5 hover:bg-[#F97316] dark:bg-[#F97316] dark:hover:bg-[#FB923C]">
+          className="mt-5 inline-flex items-center justify-center gap-2 rounded-full bg-[#111827] px-7 py-3 text-sm font-black text-white transition hover:-translate-y-0.5 hover:bg-[#F97316] dark:bg-[#F97316] dark:hover:bg-[#FB923C]"
+        >
           <Upload size={18} />
           {selectedFile ? "Replace PDF" : "Select PDF"}
         </button>
@@ -573,7 +602,8 @@ export default function SplitPdfUpload({
                   onClick={resetUpload}
                   disabled={isProcessing}
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#E7E5E4] text-[#78716C] transition hover:border-red-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-white/55"
-                  aria-label="Remove file">
+                  aria-label="Remove file"
+                >
                   <X size={17} />
                 </button>
               </div>
@@ -593,7 +623,8 @@ export default function SplitPdfUpload({
                         splitMode === "ranges"
                           ? "border-[#F97316] bg-[#FFF7ED] text-[#111827] dark:bg-[#F97316]/10 dark:text-white"
                           : "border-[#E7E5E4] bg-white text-[#57534E] hover:border-[#FDBA74] dark:border-white/10 dark:bg-white/[0.035] dark:text-white/60"
-                      }`}>
+                      }`}
+                    >
                       <Scissors size={20} className="text-[#F97316]" />
                       <p className="mt-3 text-sm font-black">Custom ranges</p>
                       <p className="mt-1 text-xs font-bold leading-5 text-[#78716C] dark:text-white/45">
@@ -609,7 +640,8 @@ export default function SplitPdfUpload({
                         splitMode === "every_page"
                           ? "border-[#F97316] bg-[#FFF7ED] text-[#111827] dark:bg-[#F97316]/10 dark:text-white"
                           : "border-[#E7E5E4] bg-white text-[#57534E] hover:border-[#FDBA74] dark:border-white/10 dark:bg-white/[0.035] dark:text-white/60"
-                      }`}>
+                      }`}
+                    >
                       <PackageOpen size={20} className="text-[#F97316]" />
                       <p className="mt-3 text-sm font-black">Every page</p>
                       <p className="mt-1 text-xs font-bold leading-5 text-[#78716C] dark:text-white/45">
@@ -625,7 +657,8 @@ export default function SplitPdfUpload({
                         splitMode === "every_n_pages"
                           ? "border-[#F97316] bg-[#FFF7ED] text-[#111827] dark:bg-[#F97316]/10 dark:text-white"
                           : "border-[#E7E5E4] bg-white text-[#57534E] hover:border-[#FDBA74] dark:border-white/10 dark:bg-white/[0.035] dark:text-white/60"
-                      }`}>
+                      }`}
+                    >
                       <Layers size={20} className="text-[#F97316]" />
                       <p className="mt-3 text-sm font-black">Every X pages</p>
                       <p className="mt-1 text-xs font-bold leading-5 text-[#78716C] dark:text-white/45">
@@ -695,7 +728,8 @@ export default function SplitPdfUpload({
                           type="button"
                           onClick={addManualRange}
                           disabled={isProcessing}
-                          className="mt-6 inline-flex items-center justify-center gap-2 rounded-2xl bg-[#F97316] px-5 py-3 text-sm font-black text-white shadow-[0_12px_24px_rgba(249,115,22,0.2)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60 sm:mt-7">
+                          className="mt-6 inline-flex items-center justify-center gap-2 rounded-2xl bg-[#F97316] px-5 py-3 text-sm font-black text-white shadow-[0_12px_24px_rgba(249,115,22,0.2)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60 sm:mt-7"
+                        >
                           <Plus size={17} />
                           Add part
                         </button>
@@ -730,7 +764,8 @@ export default function SplitPdfUpload({
                                     range.source === "auto"
                                       ? "border-green-200 dark:border-green-500/20"
                                       : "border-[#FDBA74] dark:border-[#F97316]/30"
-                                  }`}>
+                                  }`}
+                                >
                                   <div className="flex gap-3">
                                     <div className="relative flex h-24 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-[#E7E5E4] bg-[#FFF7ED] dark:border-white/10 dark:bg-[#F97316]/10">
                                       {(() => {
@@ -785,7 +820,8 @@ export default function SplitPdfUpload({
                                             }
                                             disabled={isProcessing}
                                             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#E7E5E4] text-[#78716C] transition hover:border-red-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-white/55"
-                                            aria-label="Remove range">
+                                            aria-label="Remove range"
+                                          >
                                             <X size={13} />
                                           </button>
                                         )}
@@ -802,7 +838,8 @@ export default function SplitPdfUpload({
                                             range.source === "auto"
                                               ? "bg-green-50 text-green-700 ring-green-200 dark:bg-green-500/10 dark:text-green-300 dark:ring-green-500/20"
                                               : "bg-white text-[#57534E] ring-[#E7E5E4] dark:bg-white/[0.06] dark:text-white/60 dark:ring-white/10"
-                                          }`}>
+                                          }`}
+                                        >
                                           {range.source === "auto"
                                             ? "Auto remaining"
                                             : "Manual"}
@@ -874,7 +911,8 @@ export default function SplitPdfUpload({
                   type="button"
                   onClick={processFile}
                   disabled={isProcessing}
-                  className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#F97316] px-5 py-3.5 text-sm font-black text-white shadow-[0_16px_35px_rgba(249,115,22,0.22)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60">
+                  className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#F97316] px-5 py-3.5 text-sm font-black text-white shadow-[0_16px_35px_rgba(249,115,22,0.22)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60"
+                >
                   {isProcessing ? (
                     <>
                       <Loader2 size={18} className="animate-spin" />
@@ -899,6 +937,16 @@ export default function SplitPdfUpload({
           {error}
         </div>
       )}
+
+      <ToolLimitModal
+        isOpen={limitModal.isOpen}
+        title={limitModal.title}
+        message={limitModal.message}
+        actionLabel={limitModal.actionLabel}
+        actionHref={limitModal.actionHref}
+        variant={limitModal.variant}
+        onClose={closeLimitModal}
+      />
     </div>
   );
 }

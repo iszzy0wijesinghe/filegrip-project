@@ -268,3 +268,40 @@ svg {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+
+/* FileGrip mobile scroll container fix */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  background: #fff7ed;
+}
+
+html.dark,
+html.dark body {
+  background: #080b10;
+}
+
+.filegrip-scroll-root {
+  height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(249, 115, 22, 0.08), transparent 30%),
+    radial-gradient(circle at 88% 18%, rgba(251, 146, 60, 0.08), transparent 28%),
+    linear-gradient(180deg, #fffaf5 0%, #ffffff 48%, #fff7ed 100%);
+}
+
+html.dark .filegrip-scroll-root {
+  background:
+    radial-gradient(circle at 12% 10%, rgba(249, 115, 22, 0.16), transparent 30%),
+    radial-gradient(circle at 88% 18%, rgba(251, 146, 60, 0.12), transparent 28%),
+    linear-gradient(180deg, #080b10 0%, #0f141d 52%, #080b10 100%);
+}
+
+.filegrip-scroll-root > * {
+  min-height: 100%;
+}

@@ -2,12 +2,15 @@
 
 /** @format */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  CheckCircle2,
+  FileImage,
   FileText,
+  ImageIcon,
   Loader2,
-  RotateCw,
+  Package,
   Upload,
   X,
 } from "lucide-react";
@@ -16,11 +19,13 @@ import ToolProcessingPanel from "./ToolProcessingPanel";
 import ToolResultCard from "./ToolResultCard";
 import ToolLimitModal from "./ToolLimitModal";
 
-type RotatePdfUploadProps = {
+type PdfToImageUploadProps = {
   toolSlug: string;
   inputTypes: string[];
   maxFileSizeMb?: number | null;
 };
+
+type OutputFormat = "jpg" | "png" | "webp";
 
 type FilePreview = {
   previewUrl: string | null;
@@ -35,6 +40,32 @@ type LimitModalState = {
   actionHref: string;
   variant: "compress" | "split";
 };
+
+const OUTPUT_FORMATS: {
+  value: OutputFormat;
+  label: string;
+  description: string;
+  bestFor: string;
+}[] = [
+  {
+    value: "jpg",
+    label: "JPG",
+    description: "Smaller files, great for sharing.",
+    bestFor: "Best for documents",
+  },
+  {
+    value: "png",
+    label: "PNG",
+    description: "Sharp quality with clean text.",
+    bestFor: "Best for quality",
+  },
+  {
+    value: "webp",
+    label: "WEBP",
+    description: "Modern format with strong compression.",
+    bestFor: "Best for web",
+  },
+];
 
 function formatFileSize(bytes?: number | null) {
   if (!bytes || bytes <= 0) return "0 MB";
@@ -99,20 +130,30 @@ async function createPdfPreview(file: File): Promise<FilePreview> {
   }
 }
 
-export default function RotatePdfUpload({
+function getInitialOutputFormat(toolSlug: string): OutputFormat {
+  if (toolSlug === "pdf-to-png") return "png";
+  if (toolSlug === "pdf-to-webp") return "webp";
+
+  return "jpg";
+}
+
+export default function PdfToImageUpload({
   toolSlug,
   inputTypes,
   maxFileSizeMb = 25,
-}: RotatePdfUploadProps) {
+}: PdfToImageUploadProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const resultRef = useRef<HTMLDivElement | null>(null);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<FilePreview>({
     previewUrl: null,
     pageCount: null,
   });
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>(
+    getInitialOutputFormat(toolSlug),
+  );
   const [isPreviewing, setIsPreviewing] = useState(false);
-  const [rotation, setRotation] = useState("90");
   const [isProcessing, setIsProcessing] = useState(false);
   const [job, setJob] = useState<FileJobResponse | null>(null);
   const [error, setError] = useState("");
@@ -129,13 +170,28 @@ export default function RotatePdfUpload({
     ?.map((type) => `.${type.toLowerCase()}`)
     .join(",");
 
+  const selectedFormat = useMemo(() => {
+    return OUTPUT_FORMATS.find((format) => format.value === outputFormat);
+  }, [outputFormat]);
+
+  const outputFileLabel = useMemo(() => {
+    if (!preview.pageCount) return `${outputFormat.toUpperCase()} images`;
+
+    return `${preview.pageCount} ${outputFormat.toUpperCase()} ${
+      preview.pageCount === 1 ? "image" : "images"
+    }`;
+  }, [outputFormat, preview.pageCount]);
+
   useEffect(() => {
-    return () => {
-      if (preview.previewUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(preview.previewUrl);
-      }
-    };
-  }, [preview.previewUrl]);
+    if (!job || isProcessing) return;
+
+    window.setTimeout(() => {
+      resultRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 120);
+  }, [job, isProcessing]);
 
   function closeLimitModal() {
     setLimitModal((current) => ({
@@ -155,9 +211,9 @@ export default function RotatePdfUpload({
     if (file.size > maxBytes) {
       setLimitModal({
         isOpen: true,
-        title: "Hey Homie, mmm... this file is too large.",
+        title: "Hey Homie, mmm... this PDF is too large.",
         message:
-          "Your PDF is bigger than our maximum upload limit. Try our Compress PDF tool to reduce the file size, then come back and rotate it.",
+          "Your PDF is bigger than our maximum upload limit. Try our Compress PDF tool to reduce the file size, then come back and convert it to images.",
         actionLabel: "Compress PDF",
         actionHref: "/tools/compress-pdf",
         variant: "compress",
@@ -175,7 +231,7 @@ export default function RotatePdfUpload({
       file.name.toLowerCase().endsWith(".pdf");
 
     if (!isPdf) {
-      setError("Rotate PDF only accepts PDF files.");
+      setError("PDF to Image only accepts PDF files.");
       return;
     }
 
@@ -198,19 +254,16 @@ export default function RotatePdfUpload({
   }
 
   function resetUpload() {
-    if (preview.previewUrl?.startsWith("blob:")) {
-      URL.revokeObjectURL(preview.previewUrl);
-    }
-
     setSelectedFile(null);
     setPreview({
       previewUrl: null,
       pageCount: null,
     });
-    setRotation("90");
+    setIsPreviewing(false);
     setIsProcessing(false);
     setJob(null);
     setError("");
+    setOutputFormat(getInitialOutputFormat(toolSlug));
   }
 
   async function processFile() {
@@ -226,13 +279,13 @@ export default function RotatePdfUpload({
     try {
       const [result] = await Promise.all([
         createFileJob({
-          toolSlug,
+          toolSlug: "pdf-to-image",
           files: [selectedFile],
           settings: {
-            rotation: Number(rotation),
+            output_format: outputFormat,
           },
         }),
-        wait(2400),
+        wait(2600),
       ]);
 
       setJob(result);
@@ -247,15 +300,16 @@ export default function RotatePdfUpload({
     <div className="rounded-[2rem] border border-[#E7E5E4] bg-white/90 p-4 shadow-[0_24px_70px_rgba(17,24,39,0.08)] backdrop-blur sm:p-5 dark:border-white/10 dark:bg-white/[0.04] dark:shadow-none">
       <div className="rounded-[1.5rem] border-2 border-dashed border-[#FDBA74] bg-[#FFF7ED] p-5 text-center sm:p-8 dark:border-[#F97316]/50 dark:bg-[#F97316]/10">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#F97316] text-white shadow-lg shadow-orange-500/25">
-          <RotateCw size={24} />
+          <FileImage size={24} />
         </div>
 
         <h2 className="text-2xl font-black text-[#111827] dark:text-white">
-          Upload PDF to rotate
+          Upload PDF to convert images
         </h2>
 
-        <p className="mt-3 text-sm leading-6 text-[#78716C] dark:text-white/60">
-          Rotate every page in your PDF and download a clean corrected copy.
+        <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-[#78716C] dark:text-white/60">
+          Convert every PDF page into JPG, PNG, or WEBP images. FileGrip packs
+          all converted pages into one clean ZIP download.
         </p>
 
         <input
@@ -276,15 +330,15 @@ export default function RotatePdfUpload({
         </button>
 
         <p className="mt-4 text-xs font-medium text-[#78716C] dark:text-white/45">
-          Max file size: {maxFileSizeMb ?? 25} MB
+          Max file size: {maxFileSizeMb ?? 25} MB · Output: ZIP
         </p>
       </div>
 
       {selectedFile && (
         <div className="mt-5 rounded-[1.5rem] border border-[#E7E5E4] bg-white p-4 dark:border-white/10 dark:bg-white/[0.035]">
-          <div className="grid gap-5 lg:grid-cols-[260px_1fr]">
+          <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
             <div className="overflow-hidden rounded-[1.35rem] border border-[#E7E5E4] bg-[#FFF7ED] dark:border-white/10 dark:bg-[#F97316]/10 lg:sticky lg:top-24 lg:self-start">
-              <div className="relative flex h-[280px] items-center justify-center sm:h-[320px] lg:h-[340px]">
+              <div className="relative flex h-[280px] items-center justify-center sm:h-[320px] lg:h-[360px]">
                 {isPreviewing ? (
                   <div className="flex flex-col items-center text-[#F97316]">
                     <Loader2 size={28} className="animate-spin" />
@@ -296,10 +350,7 @@ export default function RotatePdfUpload({
                   <img
                     src={preview.previewUrl}
                     alt={`${selectedFile.name} preview`}
-                    className="h-full w-full object-contain p-3 transition duration-300"
-                    style={{
-                      transform: `rotate(${rotation}deg)`,
-                    }}
+                    className="h-full w-full object-contain p-3"
                   />
                 ) : (
                   <div className="flex flex-col items-center text-[#F97316]">
@@ -311,14 +362,18 @@ export default function RotatePdfUpload({
                 )}
 
                 <div className="absolute left-3 top-3 rounded-full bg-[#F97316] px-3 py-1 text-xs font-black text-white shadow-lg">
-                  Preview
+                  First page
+                </div>
+
+                <div className="absolute bottom-3 right-3 rounded-full bg-white/95 px-3 py-1 text-xs font-black text-[#9A3412] shadow-lg ring-1 ring-[#FED7AA] dark:bg-[#111827]/90 dark:text-orange-200 dark:ring-[#F97316]/25">
+                  → {outputFormat.toUpperCase()}
                 </div>
               </div>
             </div>
 
             <div>
               <div className="flex items-start gap-4">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#FFF7ED] text-[#F97316] dark:bg-[#F97316]/10">
+                <div className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#FFF7ED] text-[#F97316] sm:flex dark:bg-[#F97316]/10">
                   <FileText size={26} />
                 </div>
 
@@ -346,12 +401,12 @@ export default function RotatePdfUpload({
                       </p>
                     </div>
 
-                    <div className="rounded-2xl border border-[#E7E5E4] bg-[#FAFAF9] p-3 dark:border-white/10 dark:bg-white/[0.035]">
-                      <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[#A8A29E] dark:text-white/35">
-                        Rotation
+                    <div className="rounded-2xl border border-green-200 bg-green-50 p-3 dark:border-green-500/20 dark:bg-green-500/10">
+                      <p className="text-[11px] font-black uppercase tracking-[0.14em] text-green-600/70 dark:text-green-300/60">
+                        Download
                       </p>
-                      <p className="mt-1 text-sm font-black text-[#111827] dark:text-white">
-                        {rotation}°
+                      <p className="mt-1 text-sm font-black text-green-700 dark:text-green-200">
+                        ZIP file
                       </p>
                     </div>
                   </div>
@@ -370,51 +425,104 @@ export default function RotatePdfUpload({
 
               {!job && (
                 <div className="mt-5">
-                  <p className="text-sm font-black text-[#111827] dark:text-white">
-                    Choose rotation
-                  </p>
+                  <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+                    <div>
+                      <p className="text-sm font-black text-[#111827] dark:text-white">
+                        Choose output image type
+                      </p>
+                      <p className="mt-1 text-xs font-bold leading-5 text-[#78716C] dark:text-white/45">
+                        FileGrip converts every page and packs the result into a
+                        ZIP.
+                      </p>
+                    </div>
 
-                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                    {["90", "180", "270"].map((value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => setRotation(value)}
-                        disabled={isProcessing}
-                        className={`rounded-[1.25rem] border p-4 text-left transition ${
-                          rotation === value
-                            ? "border-[#F97316] bg-[#FFF7ED] text-[#111827] dark:bg-[#F97316]/10 dark:text-white"
-                            : "border-[#E7E5E4] bg-white text-[#57534E] hover:border-[#FDBA74] dark:border-white/10 dark:bg-white/[0.035] dark:text-white/60"
-                        }`}
-                      >
-                        <RotateCw size={20} className="text-[#F97316]" />
-                        <p className="mt-3 text-sm font-black">
-                          Rotate {value}°
+                    <div className="rounded-full bg-[#FFF7ED] px-3 py-1.5 text-xs font-black text-[#F97316] ring-1 ring-[#FDBA74]/70 dark:bg-[#F97316]/10 dark:ring-[#F97316]/30">
+                      {outputFileLabel}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                    {OUTPUT_FORMATS.map((format) => {
+                      const isActive = outputFormat === format.value;
+
+                      return (
+                        <button
+                          key={format.value}
+                          type="button"
+                          onClick={() => setOutputFormat(format.value)}
+                          disabled={isProcessing}
+                          className={`group rounded-[1.25rem] border p-4 text-left transition ${
+                            isActive
+                              ? "border-[#F97316] bg-[#FFF7ED] text-[#111827] shadow-[0_14px_30px_rgba(249,115,22,0.12)] dark:bg-[#F97316]/10 dark:text-white"
+                              : "border-[#E7E5E4] bg-white text-[#57534E] hover:-translate-y-0.5 hover:border-[#FDBA74] dark:border-white/10 dark:bg-white/[0.035] dark:text-white/60"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#FFF7ED] text-[#F97316] ring-1 ring-[#FED7AA] dark:bg-[#F97316]/10 dark:ring-[#F97316]/25">
+                              <ImageIcon size={19} />
+                            </div>
+
+                            {isActive && (
+                              <CheckCircle2
+                                size={19}
+                                className="text-[#F97316]"
+                              />
+                            )}
+                          </div>
+
+                          <p className="mt-3 text-base font-black">
+                            {format.label}
+                          </p>
+                          <p className="mt-1 text-xs font-bold leading-5 text-[#78716C] dark:text-white/45">
+                            {format.description}
+                          </p>
+
+                          <div className="mt-3 inline-flex rounded-full bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#9A3412] ring-1 ring-[#FED7AA] dark:bg-white/[0.05] dark:text-orange-200 dark:ring-[#F97316]/25">
+                            {format.bestFor}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-5 rounded-[1.5rem] border border-green-200 bg-green-50 p-4 dark:border-green-500/20 dark:bg-green-500/10">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-green-700 ring-1 ring-green-200 dark:bg-white/[0.06] dark:text-green-300 dark:ring-green-500/20">
+                        <Package size={21} />
+                      </div>
+
+                      <div>
+                        <p className="text-sm font-black text-green-900 dark:text-green-100">
+                          ZIP download preview
                         </p>
-                        <p className="mt-1 text-xs font-bold leading-5 text-[#78716C] dark:text-white/45">
-                          Apply {value}° rotation to every page.
+                        <p className="mt-1 text-xs font-bold leading-5 text-green-700 dark:text-green-300">
+                          Your download will contain one{" "}
+                          {selectedFormat?.label ?? outputFormat.toUpperCase()}{" "}
+                          image for each PDF page, named in page order.
                         </p>
-                      </button>
-                    ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
 
               {isProcessing && (
                 <ToolProcessingPanel
-                  title="Rotating your PDF"
-                  subtitle="FileGrip is rotating every page and preparing your corrected PDF download."
+                  title={`Converting PDF to ${outputFormat.toUpperCase()}`}
+                  subtitle="FileGrip is rendering each PDF page as an image and packaging everything into a ZIP."
                 />
               )}
 
               {job && (
-                <ToolResultCard
-                  job={job}
-                  selectedFileSize={selectedFile.size}
-                  downloadLabel="Download rotated PDF"
-                  resetLabel="Rotate another PDF"
-                  onReset={resetUpload}
-                />
+                <div ref={resultRef}>
+                  <ToolResultCard
+                    job={job}
+                    selectedFileSize={selectedFile.size}
+                    downloadLabel={`Download ${outputFormat.toUpperCase()} ZIP`}
+                    resetLabel="Convert another PDF"
+                    onReset={resetUpload}
+                  />
+                </div>
               )}
 
               {!job && (
@@ -427,12 +535,12 @@ export default function RotatePdfUpload({
                   {isProcessing ? (
                     <>
                       <Loader2 size={18} className="animate-spin" />
-                      Rotating...
+                      Converting...
                     </>
                   ) : (
                     <>
-                      <RotateCw size={18} />
-                      Rotate PDF
+                      <FileImage size={18} />
+                      Convert PDF to {outputFormat.toUpperCase()} ZIP
                     </>
                   )}
                 </button>

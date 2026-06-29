@@ -2,7 +2,7 @@
 
 /** @format */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   FileImage,
@@ -15,6 +15,7 @@ import {
 import { createFileJob, FileJobResponse } from "../../lib/fileJobsApi";
 import ToolProcessingPanel from "./ToolProcessingPanel";
 import ToolResultCard from "./ToolResultCard";
+import ToolLimitModal from "./ToolLimitModal";
 
 type ImageToPdfUploadProps = {
   toolSlug: string;
@@ -26,6 +27,15 @@ type SelectedImageFile = {
   id: string;
   file: File;
   previewUrl: string;
+};
+
+type LimitModalState = {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  actionLabel: string;
+  actionHref: string;
+  variant: "compress" | "split";
 };
 
 function formatFileSize(bytes: number) {
@@ -60,10 +70,31 @@ export default function ImageToPdfUpload({
   const [isProcessing, setIsProcessing] = useState(false);
   const [job, setJob] = useState<FileJobResponse | null>(null);
   const [error, setError] = useState("");
+  const [limitModal, setLimitModal] = useState<LimitModalState>({
+    isOpen: false,
+    title: "",
+    message: "",
+    actionLabel: "",
+    actionHref: "",
+    variant: "compress",
+  });
 
   const acceptedTypes = inputTypes
     ?.map((type) => `.${type.toLowerCase()}`)
     .join(",");
+
+  useEffect(() => {
+    return () => {
+      selectedFiles.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+    };
+  }, [selectedFiles]);
+
+  function closeLimitModal() {
+    setLimitModal((current) => ({
+      ...current,
+      isOpen: false,
+    }));
+  }
 
   function handleFiles(files: FileList | null) {
     setError("");
@@ -77,7 +108,20 @@ export default function ImageToPdfUpload({
     const tooLarge = incomingFiles.find((file) => file.size > maxBytes);
 
     if (tooLarge) {
-      setError(`"${tooLarge.name}" is larger than ${maxFileSizeMb} MB.`);
+      setLimitModal({
+        isOpen: true,
+        title: "Hey Homie, this image is too large.",
+        message:
+          `"${tooLarge.name}" is bigger than our maximum upload limit. Try our Compress Image tool first, then come back and convert it to PDF.`,
+        actionLabel: "Compress Image",
+        actionHref: "/tools/compress-image",
+        variant: "compress",
+      });
+
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+
       return;
     }
 
@@ -405,6 +449,16 @@ export default function ImageToPdfUpload({
           {error}
         </div>
       )}
+
+      <ToolLimitModal
+        isOpen={limitModal.isOpen}
+        title={limitModal.title}
+        message={limitModal.message}
+        actionLabel={limitModal.actionLabel}
+        actionHref={limitModal.actionHref}
+        variant={limitModal.variant}
+        onClose={closeLimitModal}
+      />
     </div>
   );
 }

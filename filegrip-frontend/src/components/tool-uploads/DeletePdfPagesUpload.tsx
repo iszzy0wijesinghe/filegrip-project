@@ -1,5 +1,3 @@
-/** @format */
-
 "use client";
 
 /** @format */
@@ -19,6 +17,7 @@ import {
 import { createFileJob, FileJobResponse } from "../../lib/fileJobsApi";
 import ToolProcessingPanel from "./ToolProcessingPanel";
 import ToolResultCard from "./ToolResultCard";
+import ToolLimitModal from "./ToolLimitModal";
 
 type DeletePdfPagesUploadProps = {
   toolSlug: string;
@@ -35,6 +34,17 @@ type PdfPreviewResult = {
   pageCount: number | null;
   pages: PagePreview[];
 };
+
+type LimitModalState = {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  actionLabel: string;
+  actionHref: string;
+  variant: "compress" | "split";
+};
+
+const MAX_DELETE_PDF_PAGES = 30;
 
 function formatFileSize(bytes?: number | null) {
   if (!bytes || bytes <= 0) return "0 MB";
@@ -212,6 +222,14 @@ export default function DeletePdfPagesUpload({
   const [isProcessing, setIsProcessing] = useState(false);
   const [job, setJob] = useState<FileJobResponse | null>(null);
   const [error, setError] = useState("");
+  const [limitModal, setLimitModal] = useState<LimitModalState>({
+    isOpen: false,
+    title: "",
+    message: "",
+    actionLabel: "",
+    actionHref: "",
+    variant: "compress",
+  });
 
   const acceptedTypes = inputTypes
     ?.map((type) => `.${type.toLowerCase()}`)
@@ -251,6 +269,13 @@ export default function DeletePdfPagesUpload({
     }, 120);
   }, [job, isProcessing]);
 
+  function closeLimitModal() {
+    setLimitModal((current) => ({
+      ...current,
+      isOpen: false,
+    }));
+  }
+
   async function handleFile(file: File | null) {
     setError("");
     setJob(null);
@@ -260,7 +285,20 @@ export default function DeletePdfPagesUpload({
     const maxBytes = (maxFileSizeMb ?? 25) * 1024 * 1024;
 
     if (file.size > maxBytes) {
-      setError(`"${file.name}" is larger than ${maxFileSizeMb} MB.`);
+      setLimitModal({
+        isOpen: true,
+        title: "Hey Homie, mmm... this file is too large.",
+        message:
+          "Your file is bigger than our maximum upload limit. Try our Compress PDF tool to reduce the file size, then come back and retry.",
+        actionLabel: "Compress PDF",
+        actionHref: "/tools/compress-pdf",
+        variant: "compress",
+      });
+
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+
       return;
     }
 
@@ -281,6 +319,34 @@ export default function DeletePdfPagesUpload({
     setIsPreviewing(true);
 
     const previewResult = await createPdfPagePreviews(file);
+
+    if (
+      previewResult.pageCount &&
+      previewResult.pageCount > MAX_DELETE_PDF_PAGES
+    ) {
+      setSelectedFile(null);
+      setPageCount(null);
+      setPagePreviews([]);
+      setDeletedPages([]);
+      setRangeInput("");
+      setIsPreviewing(false);
+
+      setLimitModal({
+        isOpen: true,
+        title: "Hey Homie, this PDF has too many pages.",
+        message:
+          "Delete PDF Pages currently supports up to 30 pages at once. Split this PDF into smaller parts first, then delete pages in batches.",
+        actionLabel: "Split PDF",
+        actionHref: "/tools/split-pdf",
+        variant: "split",
+      });
+
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+
+      return;
+    }
 
     setPageCount(previewResult.pageCount);
     setPagePreviews(previewResult.pages);
@@ -421,13 +487,15 @@ export default function DeletePdfPagesUpload({
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          className="mt-5 inline-flex items-center justify-center gap-2 rounded-full bg-[#111827] px-7 py-3 text-sm font-black text-white transition hover:-translate-y-0.5 hover:bg-[#F97316] dark:bg-[#F97316] dark:hover:bg-[#FB923C]">
+          className="mt-5 inline-flex items-center justify-center gap-2 rounded-full bg-[#111827] px-7 py-3 text-sm font-black text-white transition hover:-translate-y-0.5 hover:bg-[#F97316] dark:bg-[#F97316] dark:hover:bg-[#FB923C]"
+        >
           <Upload size={18} />
           {selectedFile ? "Replace PDF" : "Select PDF"}
         </button>
 
         <p className="mt-4 text-xs font-medium text-[#78716C] dark:text-white/45">
-          Max file size: {maxFileSizeMb ?? 25} MB
+          Max file size: {maxFileSizeMb ?? 25} MB · Max pages:{" "}
+          {MAX_DELETE_PDF_PAGES}
         </p>
       </div>
 
@@ -487,7 +555,8 @@ export default function DeletePdfPagesUpload({
               onClick={resetUpload}
               disabled={isProcessing}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#E7E5E4] text-[#78716C] transition hover:border-red-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-white/55"
-              aria-label="Remove file">
+              aria-label="Remove file"
+            >
               <X size={17} />
             </button>
           </div>
@@ -544,7 +613,8 @@ export default function DeletePdfPagesUpload({
                       type="button"
                       onClick={applyRangeInput}
                       disabled={isProcessing || !rangeInput.trim()}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#F97316] px-5 py-3 text-sm font-black text-white shadow-[0_12px_24px_rgba(249,115,22,0.2)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60">
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#F97316] px-5 py-3 text-sm font-black text-white shadow-[0_12px_24px_rgba(249,115,22,0.2)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
                       <Plus size={17} />
                       Add range
                     </button>
@@ -569,7 +639,8 @@ export default function DeletePdfPagesUpload({
                         type="button"
                         onClick={restoreAllPages}
                         disabled={isProcessing}
-                        className="inline-flex items-center gap-2 rounded-full border border-[#E7E5E4] bg-white px-3 py-2 text-xs font-black text-[#57534E] transition hover:border-[#F97316] hover:text-[#F97316] dark:border-white/10 dark:bg-white/[0.04] dark:text-white/60">
+                        className="inline-flex items-center gap-2 rounded-full border border-[#E7E5E4] bg-white px-3 py-2 text-xs font-black text-[#57534E] transition hover:border-[#F97316] hover:text-[#F97316] dark:border-white/10 dark:bg-white/[0.04] dark:text-white/60"
+                      >
                         <RotateCcw size={14} />
                         Restore all
                       </button>
@@ -596,7 +667,8 @@ export default function DeletePdfPagesUpload({
                             isDeleted
                               ? "border-red-300 bg-red-50 opacity-80 dark:border-red-500/30 dark:bg-red-500/10"
                               : "border-[#E7E5E4] bg-white hover:-translate-y-0.5 hover:border-[#FDBA74] dark:border-white/10 dark:bg-white/[0.04]"
-                          }`}>
+                          }`}
+                        >
                           <div className="relative flex h-[132px] items-center justify-center overflow-hidden rounded-2xl bg-[#FFF7ED] sm:h-[150px] dark:bg-[#F97316]/10">
                             {page.previewUrl ? (
                               <img
@@ -633,7 +705,8 @@ export default function DeletePdfPagesUpload({
                                 isDeleted
                                   ? "text-red-700 dark:text-red-200"
                                   : "text-[#111827] dark:text-white"
-                              }`}>
+                              }`}
+                            >
                               Page {page.pageNumber}
                             </p>
 
@@ -676,7 +749,8 @@ export default function DeletePdfPagesUpload({
                       {keptPages.map((page, index) => (
                         <div
                           key={page.pageNumber}
-                          className="w-[104px] shrink-0 rounded-[1.15rem] border border-green-200 bg-white p-2 dark:border-green-500/20 dark:bg-white/[0.06] sm:w-[116px]">
+                          className="w-[104px] shrink-0 rounded-[1.15rem] border border-green-200 bg-white p-2 dark:border-green-500/20 dark:bg-white/[0.06] sm:w-[116px]"
+                        >
                           <div className="relative flex h-[132px] items-center justify-center overflow-hidden rounded-2xl bg-green-50 dark:bg-green-500/10 sm:h-[148px]">
                             {page.previewUrl ? (
                               <img
@@ -713,7 +787,8 @@ export default function DeletePdfPagesUpload({
                     removedPages.length > 0
                       ? "border border-red-200 bg-red-50 dark:border-red-500/20 dark:bg-red-500/10"
                       : "border border-[#E7E5E4] bg-[#FAFAF9] dark:border-white/10 dark:bg-white/[0.035]"
-                  }`}>
+                  }`}
+                >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p
@@ -721,7 +796,8 @@ export default function DeletePdfPagesUpload({
                           removedPages.length > 0
                             ? "text-red-900 dark:text-red-100"
                             : "text-[#111827] dark:text-white"
-                        }`}>
+                        }`}
+                      >
                         Deleted page stack
                       </p>
                       <p
@@ -729,7 +805,8 @@ export default function DeletePdfPagesUpload({
                           removedPages.length > 0
                             ? "text-red-700 dark:text-red-300"
                             : "text-[#78716C] dark:text-white/45"
-                        }`}>
+                        }`}
+                      >
                         Removed pages appear here. Scroll horizontally after 3
                         cards.
                       </p>
@@ -740,7 +817,8 @@ export default function DeletePdfPagesUpload({
                         removedPages.length > 0
                           ? "text-red-700 ring-red-200 dark:text-red-200 dark:ring-red-500/20"
                           : "text-[#57534E] ring-[#E7E5E4] dark:text-white/60 dark:ring-white/10"
-                      }`}>
+                      }`}
+                    >
                       {removedPages.length}
                     </div>
                   </div>
@@ -761,7 +839,8 @@ export default function DeletePdfPagesUpload({
                             type="button"
                             onClick={() => toggleDeletedPage(page.pageNumber)}
                             disabled={isProcessing}
-                            className="group w-[150px] shrink-0 rounded-[1.2rem] border border-red-200 bg-white p-2 text-left transition hover:-translate-y-0.5 hover:border-red-300 dark:border-red-500/20 dark:bg-white/[0.06]">
+                            className="group w-[150px] shrink-0 rounded-[1.2rem] border border-red-200 bg-white p-2 text-left transition hover:-translate-y-0.5 hover:border-red-300 dark:border-red-500/20 dark:bg-white/[0.06]"
+                          >
                             <div className="relative flex h-[120px] items-center justify-center overflow-hidden rounded-2xl bg-red-50 dark:bg-red-500/10">
                               {page.previewUrl ? (
                                 <img
@@ -835,7 +914,8 @@ export default function DeletePdfPagesUpload({
               type="button"
               onClick={processFile}
               disabled={!canProcess}
-              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#F97316] px-5 py-3.5 text-sm font-black text-white shadow-[0_16px_35px_rgba(249,115,22,0.22)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60">
+              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#F97316] px-5 py-3.5 text-sm font-black text-white shadow-[0_16px_35px_rgba(249,115,22,0.22)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60"
+            >
               {isProcessing ? (
                 <>
                   <Loader2 size={18} className="animate-spin" />
@@ -858,6 +938,16 @@ export default function DeletePdfPagesUpload({
           {error}
         </div>
       )}
+
+      <ToolLimitModal
+        isOpen={limitModal.isOpen}
+        title={limitModal.title}
+        message={limitModal.message}
+        actionLabel={limitModal.actionLabel}
+        actionHref={limitModal.actionHref}
+        variant={limitModal.variant}
+        onClose={closeLimitModal}
+      />
     </div>
   );
 }
