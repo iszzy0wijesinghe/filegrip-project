@@ -1,3 +1,5 @@
+/** @format */
+
 "use client";
 
 /** @format */
@@ -18,6 +20,7 @@ import { createFileJob, FileJobResponse } from "../../lib/fileJobsApi";
 import ToolProcessingPanel from "./ToolProcessingPanel";
 import ToolResultCard from "./ToolResultCard";
 import ToolLimitModal from "./ToolLimitModal";
+import useFileDropzone from "../../hooks/useFileDropzone";
 
 type DeletePdfPagesUploadProps = {
   toolSlug: string;
@@ -235,6 +238,14 @@ export default function DeletePdfPagesUpload({
     ?.map((type) => `.${type.toLowerCase()}`)
     .join(",");
 
+  const { isDragging, dropzoneHandlers } = useFileDropzone({
+    disabled: isProcessing || isPreviewing || Boolean(job),
+    multiple: false,
+    onFilesDrop: (droppedFiles) => {
+      void handleFile(droppedFiles[0] ?? null);
+    },
+  });
+
   const deletedPageText = useMemo(
     () => compressPagesToRangeText(deletedPages),
     [deletedPages],
@@ -308,6 +319,11 @@ export default function DeletePdfPagesUpload({
 
     if (!isPdf) {
       setError("Delete PDF Pages only accepts PDF files.");
+
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+
       return;
     }
 
@@ -462,7 +478,21 @@ export default function DeletePdfPagesUpload({
 
   return (
     <div className="rounded-[2rem] border border-[#E7E5E4] bg-white/90 p-3 shadow-[0_24px_70px_rgba(17,24,39,0.08)] backdrop-blur sm:p-5 dark:border-white/10 dark:bg-white/[0.04] dark:shadow-none">
-      <div className="rounded-[1.5rem] border-2 border-dashed border-[#FDBA74] bg-[#FFF7ED] p-5 text-center sm:p-8 dark:border-[#F97316]/50 dark:bg-[#F97316]/10">
+      <div
+        {...dropzoneHandlers}
+        className={`relative overflow-hidden rounded-[1.5rem] border-2 border-dashed p-5 text-center transition duration-200 sm:p-8 ${
+          isDragging
+            ? "scale-[1.01] border-[#F97316] bg-[#FFF7ED] shadow-[0_24px_60px_rgba(249,115,22,0.18)] dark:border-[#F97316] dark:bg-[#F97316]/15"
+            : "border-[#FDBA74] bg-[#FFF7ED] hover:border-[#F97316] hover:bg-[#FFF7ED]/90 dark:border-[#F97316]/50 dark:bg-[#F97316]/10 dark:hover:border-[#F97316]"
+        }`}>
+        {isDragging && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[1.5rem] bg-[#F97316]/12 backdrop-blur-[2px]">
+            <div className="inline-flex items-center gap-2 rounded-full bg-[#F97316] px-5 py-2.5 text-sm font-black text-white shadow-[0_18px_42px_rgba(249,115,22,0.32)]">
+              <Upload size={17} />
+              Drop PDF to upload
+            </div>
+          </div>
+        )}
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#F97316] text-white shadow-lg shadow-orange-500/25">
           <Trash2 size={24} />
         </div>
@@ -487,8 +517,8 @@ export default function DeletePdfPagesUpload({
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          className="mt-5 inline-flex items-center justify-center gap-2 rounded-full bg-[#111827] px-7 py-3 text-sm font-black text-white transition hover:-translate-y-0.5 hover:bg-[#F97316] dark:bg-[#F97316] dark:hover:bg-[#FB923C]"
-        >
+          disabled={isProcessing || isPreviewing || Boolean(job)}
+          className="mt-5 inline-flex items-center justify-center gap-2 rounded-full bg-[#111827] px-7 py-3 text-sm font-black text-white transition hover:-translate-y-0.5 hover:bg-[#F97316] disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[#F97316] dark:hover:bg-[#FB923C]">
           <Upload size={18} />
           {selectedFile ? "Replace PDF" : "Select PDF"}
         </button>
@@ -555,8 +585,7 @@ export default function DeletePdfPagesUpload({
               onClick={resetUpload}
               disabled={isProcessing}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#E7E5E4] text-[#78716C] transition hover:border-red-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-white/55"
-              aria-label="Remove file"
-            >
+              aria-label="Remove file">
               <X size={17} />
             </button>
           </div>
@@ -613,8 +642,7 @@ export default function DeletePdfPagesUpload({
                       type="button"
                       onClick={applyRangeInput}
                       disabled={isProcessing || !rangeInput.trim()}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#F97316] px-5 py-3 text-sm font-black text-white shadow-[0_12px_24px_rgba(249,115,22,0.2)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60"
-                    >
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#F97316] px-5 py-3 text-sm font-black text-white shadow-[0_12px_24px_rgba(249,115,22,0.2)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60">
                       <Plus size={17} />
                       Add range
                     </button>
@@ -639,8 +667,7 @@ export default function DeletePdfPagesUpload({
                         type="button"
                         onClick={restoreAllPages}
                         disabled={isProcessing}
-                        className="inline-flex items-center gap-2 rounded-full border border-[#E7E5E4] bg-white px-3 py-2 text-xs font-black text-[#57534E] transition hover:border-[#F97316] hover:text-[#F97316] dark:border-white/10 dark:bg-white/[0.04] dark:text-white/60"
-                      >
+                        className="inline-flex items-center gap-2 rounded-full border border-[#E7E5E4] bg-white px-3 py-2 text-xs font-black text-[#57534E] transition hover:border-[#F97316] hover:text-[#F97316] dark:border-white/10 dark:bg-white/[0.04] dark:text-white/60">
                         <RotateCcw size={14} />
                         Restore all
                       </button>
@@ -667,8 +694,7 @@ export default function DeletePdfPagesUpload({
                             isDeleted
                               ? "border-red-300 bg-red-50 opacity-80 dark:border-red-500/30 dark:bg-red-500/10"
                               : "border-[#E7E5E4] bg-white hover:-translate-y-0.5 hover:border-[#FDBA74] dark:border-white/10 dark:bg-white/[0.04]"
-                          }`}
-                        >
+                          }`}>
                           <div className="relative flex h-[132px] items-center justify-center overflow-hidden rounded-2xl bg-[#FFF7ED] sm:h-[150px] dark:bg-[#F97316]/10">
                             {page.previewUrl ? (
                               <img
@@ -705,8 +731,7 @@ export default function DeletePdfPagesUpload({
                                 isDeleted
                                   ? "text-red-700 dark:text-red-200"
                                   : "text-[#111827] dark:text-white"
-                              }`}
-                            >
+                              }`}>
                               Page {page.pageNumber}
                             </p>
 
@@ -749,8 +774,7 @@ export default function DeletePdfPagesUpload({
                       {keptPages.map((page, index) => (
                         <div
                           key={page.pageNumber}
-                          className="w-[104px] shrink-0 rounded-[1.15rem] border border-green-200 bg-white p-2 dark:border-green-500/20 dark:bg-white/[0.06] sm:w-[116px]"
-                        >
+                          className="w-[104px] shrink-0 rounded-[1.15rem] border border-green-200 bg-white p-2 dark:border-green-500/20 dark:bg-white/[0.06] sm:w-[116px]">
                           <div className="relative flex h-[132px] items-center justify-center overflow-hidden rounded-2xl bg-green-50 dark:bg-green-500/10 sm:h-[148px]">
                             {page.previewUrl ? (
                               <img
@@ -787,8 +811,7 @@ export default function DeletePdfPagesUpload({
                     removedPages.length > 0
                       ? "border border-red-200 bg-red-50 dark:border-red-500/20 dark:bg-red-500/10"
                       : "border border-[#E7E5E4] bg-[#FAFAF9] dark:border-white/10 dark:bg-white/[0.035]"
-                  }`}
-                >
+                  }`}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p
@@ -796,8 +819,7 @@ export default function DeletePdfPagesUpload({
                           removedPages.length > 0
                             ? "text-red-900 dark:text-red-100"
                             : "text-[#111827] dark:text-white"
-                        }`}
-                      >
+                        }`}>
                         Deleted page stack
                       </p>
                       <p
@@ -805,8 +827,7 @@ export default function DeletePdfPagesUpload({
                           removedPages.length > 0
                             ? "text-red-700 dark:text-red-300"
                             : "text-[#78716C] dark:text-white/45"
-                        }`}
-                      >
+                        }`}>
                         Removed pages appear here. Scroll horizontally after 3
                         cards.
                       </p>
@@ -817,8 +838,7 @@ export default function DeletePdfPagesUpload({
                         removedPages.length > 0
                           ? "text-red-700 ring-red-200 dark:text-red-200 dark:ring-red-500/20"
                           : "text-[#57534E] ring-[#E7E5E4] dark:text-white/60 dark:ring-white/10"
-                      }`}
-                    >
+                      }`}>
                       {removedPages.length}
                     </div>
                   </div>
@@ -839,8 +859,7 @@ export default function DeletePdfPagesUpload({
                             type="button"
                             onClick={() => toggleDeletedPage(page.pageNumber)}
                             disabled={isProcessing}
-                            className="group w-[150px] shrink-0 rounded-[1.2rem] border border-red-200 bg-white p-2 text-left transition hover:-translate-y-0.5 hover:border-red-300 dark:border-red-500/20 dark:bg-white/[0.06]"
-                          >
+                            className="group w-[150px] shrink-0 rounded-[1.2rem] border border-red-200 bg-white p-2 text-left transition hover:-translate-y-0.5 hover:border-red-300 dark:border-red-500/20 dark:bg-white/[0.06]">
                             <div className="relative flex h-[120px] items-center justify-center overflow-hidden rounded-2xl bg-red-50 dark:bg-red-500/10">
                               {page.previewUrl ? (
                                 <img
@@ -914,8 +933,7 @@ export default function DeletePdfPagesUpload({
               type="button"
               onClick={processFile}
               disabled={!canProcess}
-              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#F97316] px-5 py-3.5 text-sm font-black text-white shadow-[0_16px_35px_rgba(249,115,22,0.22)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60"
-            >
+              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#F97316] px-5 py-3.5 text-sm font-black text-white shadow-[0_16px_35px_rgba(249,115,22,0.22)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60">
               {isProcessing ? (
                 <>
                   <Loader2 size={18} className="animate-spin" />

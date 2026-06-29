@@ -1,3 +1,5 @@
+/** @format */
+
 "use client";
 
 /** @format */
@@ -19,6 +21,7 @@ import { createFileJob, FileJobResponse } from "../../lib/fileJobsApi";
 import ToolProcessingPanel from "./ToolProcessingPanel";
 import ToolResultCard from "./ToolResultCard";
 import ToolLimitModal from "./ToolLimitModal";
+import useFileDropzone from "../../hooks/useFileDropzone";
 
 type CompressImageUploadProps = {
   toolSlug: string;
@@ -108,6 +111,14 @@ export default function CompressImageUpload({
     inputTypes && inputTypes.length > 0
       ? inputTypes.map((type) => `.${type.toLowerCase()}`).join(",")
       : ".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp";
+
+  const { isDragging, dropzoneHandlers } = useFileDropzone({
+    disabled: isProcessing || Boolean(job),
+    multiple: false,
+    onFilesDrop: (droppedFiles) => {
+      handleFile(droppedFiles[0] ?? null);
+    },
+  });
 
   useEffect(() => {
     return () => {
@@ -229,7 +240,21 @@ export default function CompressImageUpload({
 
   return (
     <div className="rounded-[2rem] border border-[#E7E5E4] bg-white/90 p-4 shadow-[0_24px_70px_rgba(17,24,39,0.08)] backdrop-blur sm:p-5 dark:border-white/10 dark:bg-white/[0.04] dark:shadow-none">
-      <div className="rounded-[1.5rem] border-2 border-dashed border-[#FDBA74] bg-[#FFF7ED] p-5 text-center sm:p-6 dark:border-[#F97316]/50 dark:bg-[#F97316]/10">
+      <div
+        {...dropzoneHandlers}
+        className={`relative overflow-hidden rounded-[1.5rem] border-2 border-dashed p-5 text-center transition duration-200 sm:p-6 ${
+          isDragging
+            ? "scale-[1.01] border-[#F97316] bg-[#FFF7ED] shadow-[0_24px_60px_rgba(249,115,22,0.18)] dark:border-[#F97316] dark:bg-[#F97316]/15"
+            : "border-[#FDBA74] bg-[#FFF7ED] hover:border-[#F97316] hover:bg-[#FFF7ED]/90 dark:border-[#F97316]/50 dark:bg-[#F97316]/10 dark:hover:border-[#F97316]"
+        }`}>
+        {isDragging && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[1.5rem] bg-[#F97316]/12 backdrop-blur-[2px]">
+            <div className="inline-flex items-center gap-2 rounded-full bg-[#F97316] px-5 py-2.5 text-sm font-black text-white shadow-[0_18px_42px_rgba(249,115,22,0.32)]">
+              <Upload size={17} />
+              Drop image to upload
+            </div>
+          </div>
+        )}
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#F97316] text-white shadow-lg shadow-orange-500/25">
           <SlidersHorizontal size={24} />
         </div>
@@ -254,9 +279,8 @@ export default function CompressImageUpload({
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          disabled={isProcessing}
-          className="mt-5 inline-flex items-center justify-center gap-2 rounded-full bg-[#111827] px-7 py-3 text-sm font-black text-white transition hover:-translate-y-0.5 hover:bg-[#F97316] disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[#F97316] dark:hover:bg-[#FB923C]"
-        >
+          disabled={isProcessing || Boolean(job)}
+          className="mt-5 inline-flex items-center justify-center gap-2 rounded-full bg-[#111827] px-7 py-3 text-sm font-black text-white transition hover:-translate-y-0.5 hover:bg-[#F97316] disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[#F97316] dark:hover:bg-[#FB923C]">
           <Upload size={18} />
           {selectedFile ? "Choose another image" : "Select image"}
         </button>
@@ -298,8 +322,7 @@ export default function CompressImageUpload({
                 <button
                   type="button"
                   onClick={clearFile}
-                  className="inline-flex items-center justify-center gap-2 rounded-full border border-[#E7E5E4] px-4 py-2 text-xs font-black text-[#57534E] transition hover:border-red-300 hover:text-red-600 dark:border-white/10 dark:text-white/60"
-                >
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-[#E7E5E4] px-4 py-2 text-xs font-black text-[#57534E] transition hover:border-red-300 hover:text-red-600 dark:border-white/10 dark:text-white/60">
                   <X size={15} />
                   Remove
                 </button>
@@ -371,8 +394,7 @@ export default function CompressImageUpload({
                       outputFormat === format
                         ? "border-[#F97316] bg-[#F97316] text-white shadow-[0_12px_25px_rgba(249,115,22,0.22)]"
                         : "border-[#E7E5E4] bg-white text-[#57534E] hover:border-[#F97316] hover:text-[#F97316] dark:border-white/10 dark:bg-white/[0.04] dark:text-white/60"
-                    }`}
-                  >
+                    }`}>
                     {format}
                   </button>
                 ))}
@@ -425,8 +447,7 @@ export default function CompressImageUpload({
                 type="button"
                 onClick={processFile}
                 disabled={isProcessing}
-                className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#F97316] px-5 py-3.5 text-sm font-black text-white shadow-[0_16px_35px_rgba(249,115,22,0.22)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60"
-              >
+                className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#F97316] px-5 py-3.5 text-sm font-black text-white shadow-[0_16px_35px_rgba(249,115,22,0.22)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60">
                 {isProcessing ? (
                   <>
                     <Loader2 size={18} className="animate-spin" />

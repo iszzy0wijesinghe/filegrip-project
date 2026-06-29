@@ -1,3 +1,5 @@
+/** @format */
+
 "use client";
 
 /** @format */
@@ -16,6 +18,7 @@ import { createFileJob, FileJobResponse } from "../../lib/fileJobsApi";
 import ToolProcessingPanel from "./ToolProcessingPanel";
 import ToolResultCard from "./ToolResultCard";
 import ToolLimitModal from "./ToolLimitModal";
+import useFileDropzone from "../../hooks/useFileDropzone";
 
 type ImageToPdfUploadProps = {
   toolSlug: string;
@@ -97,6 +100,14 @@ export default function ImageToPdfUpload({
       ? inputTypes.map((type) => `.${type.toLowerCase()}`).join(",")
       : ".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp";
 
+  const { isDragging, dropzoneHandlers } = useFileDropzone({
+    disabled: isProcessing || Boolean(job),
+    multiple: true,
+    onFilesDrop: (droppedFiles) => {
+      handleFiles(droppedFiles);
+    },
+  });
+
   useEffect(() => {
     return () => {
       selectedFiles.forEach((item) => URL.revokeObjectURL(item.previewUrl));
@@ -121,7 +132,7 @@ export default function ImageToPdfUpload({
     }));
   }
 
-  function handleFiles(files: FileList | null) {
+  function handleFiles(files: FileList | File[] | null) {
     setError("");
     setJob(null);
 
@@ -136,8 +147,7 @@ export default function ImageToPdfUpload({
       setLimitModal({
         isOpen: true,
         title: "Hey Homie, this image is too large.",
-        message:
-          `"${tooLarge.name}" is bigger than our maximum upload limit. Try compressing the image first, then come back and convert it to PDF.`,
+        message: `"${tooLarge.name}" is bigger than our maximum upload limit. Try compressing the image first, then come back and convert it to PDF.`,
         actionLabel: "Compress Image",
         actionHref: "/tools/compress-image",
         variant: "compress",
@@ -154,6 +164,11 @@ export default function ImageToPdfUpload({
 
     if (imageError) {
       setError("Image to PDF only accepts JPG, PNG, and WEBP image files.");
+
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+
       return;
     }
 
@@ -270,7 +285,21 @@ export default function ImageToPdfUpload({
 
   return (
     <div className="rounded-[2rem] border border-[#E7E5E4] bg-white/90 p-4 shadow-[0_24px_70px_rgba(17,24,39,0.08)] backdrop-blur sm:p-5 dark:border-white/10 dark:bg-white/[0.04] dark:shadow-none">
-      <div className="rounded-[1.5rem] border-2 border-dashed border-[#FDBA74] bg-[#FFF7ED] p-5 text-center sm:p-6 dark:border-[#F97316]/50 dark:bg-[#F97316]/10">
+      <div
+        {...dropzoneHandlers}
+        className={`relative overflow-hidden rounded-[1.5rem] border-2 border-dashed p-5 text-center transition duration-200 sm:p-6 ${
+          isDragging
+            ? "scale-[1.01] border-[#F97316] bg-[#FFF7ED] shadow-[0_24px_60px_rgba(249,115,22,0.18)] dark:border-[#F97316] dark:bg-[#F97316]/15"
+            : "border-[#FDBA74] bg-[#FFF7ED] hover:border-[#F97316] hover:bg-[#FFF7ED]/90 dark:border-[#F97316]/50 dark:bg-[#F97316]/10 dark:hover:border-[#F97316]"
+        }`}>
+        {isDragging && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[1.5rem] bg-[#F97316]/12 backdrop-blur-[2px]">
+            <div className="inline-flex items-center gap-2 rounded-full bg-[#F97316] px-5 py-2.5 text-sm font-black text-white shadow-[0_18px_42px_rgba(249,115,22,0.32)]">
+              <Upload size={17} />
+              Drop images to upload
+            </div>
+          </div>
+        )}
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#F97316] text-white shadow-lg shadow-orange-500/25">
           <Upload size={24} />
         </div>
@@ -296,8 +325,8 @@ export default function ImageToPdfUpload({
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          className="mt-5 inline-flex items-center justify-center gap-2 rounded-full bg-[#111827] px-7 py-3 text-sm font-black text-white transition hover:-translate-y-0.5 hover:bg-[#F97316] dark:bg-[#F97316] dark:hover:bg-[#FB923C]"
-        >
+          disabled={isProcessing || Boolean(job)}
+          className="mt-5 inline-flex items-center justify-center gap-2 rounded-full bg-[#111827] px-7 py-3 text-sm font-black text-white transition hover:-translate-y-0.5 hover:bg-[#F97316] disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[#F97316] dark:hover:bg-[#FB923C]">
           <Plus size={18} />
           {selectedFiles.length > 0 ? "Add more images" : "Select images"}
         </button>
@@ -327,8 +356,7 @@ export default function ImageToPdfUpload({
                   type="button"
                   onClick={() => inputRef.current?.click()}
                   disabled={isProcessing}
-                  className="rounded-full border border-[#E7E5E4] px-4 py-2 text-xs font-black text-[#57534E] transition hover:border-[#F97316] hover:text-[#F97316] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-white/60"
-                >
+                  className="rounded-full border border-[#E7E5E4] px-4 py-2 text-xs font-black text-[#57534E] transition hover:border-[#F97316] hover:text-[#F97316] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-white/60">
                   Add more
                 </button>
               )}
@@ -337,8 +365,7 @@ export default function ImageToPdfUpload({
                 type="button"
                 onClick={clearFiles}
                 disabled={isProcessing}
-                className="rounded-full border border-[#E7E5E4] px-4 py-2 text-xs font-black text-[#57534E] transition hover:border-red-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-white/60 dark:hover:border-red-500/40 dark:hover:text-red-300"
-              >
+                className="rounded-full border border-[#E7E5E4] px-4 py-2 text-xs font-black text-[#57534E] transition hover:border-red-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-white/60 dark:hover:border-red-500/40 dark:hover:text-red-300">
                 Clear
               </button>
             </div>
@@ -357,8 +384,7 @@ export default function ImageToPdfUpload({
                   draggingId === item.id
                     ? "scale-[0.98] border-[#F97316] opacity-60"
                     : "border-[#E7E5E4] hover:-translate-y-0.5 hover:border-[#FDBA74] dark:border-white/10 dark:hover:border-[#F97316]/60"
-                } ${isProcessing || job ? "pointer-events-none opacity-80" : ""}`}
-              >
+                } ${isProcessing || job ? "pointer-events-none opacity-80" : ""}`}>
                 <div className="relative overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-white/10 dark:bg-[#080B10]">
                   <div className="absolute left-3 top-3 z-10 rounded-full bg-[#F97316] px-2.5 py-1 text-xs font-black text-white shadow-lg">
                     Page {index + 1}
@@ -369,8 +395,7 @@ export default function ImageToPdfUpload({
                       type="button"
                       onClick={() => removeFile(item.id)}
                       className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-[#78716C] shadow-lg transition hover:bg-red-50 hover:text-red-600 dark:bg-[#10151D]/95 dark:text-white/55 dark:hover:bg-red-500/10 dark:hover:text-red-300"
-                      aria-label="Remove image"
-                    >
+                      aria-label="Remove image">
                       <X size={16} />
                     </button>
                   )}
@@ -389,8 +414,7 @@ export default function ImageToPdfUpload({
                     type="button"
                     disabled={isProcessing || Boolean(job)}
                     className="mt-0.5 cursor-grab rounded-lg p-1 text-[#A8A29E] disabled:cursor-not-allowed disabled:opacity-50 active:cursor-grabbing dark:text-white/35"
-                    aria-label="Drag to reorder"
-                  >
+                    aria-label="Drag to reorder">
                     <GripVertical size={18} />
                   </button>
 
@@ -415,8 +439,7 @@ export default function ImageToPdfUpload({
                           type="button"
                           onClick={() => moveFile(index, index - 1)}
                           disabled={index === 0}
-                          className="rounded-full border border-[#E7E5E4] px-3 py-1.5 text-xs font-black text-[#57534E] disabled:opacity-40 dark:border-white/10 dark:text-white/55"
-                        >
+                          className="rounded-full border border-[#E7E5E4] px-3 py-1.5 text-xs font-black text-[#57534E] disabled:opacity-40 dark:border-white/10 dark:text-white/55">
                           Up
                         </button>
 
@@ -424,8 +447,7 @@ export default function ImageToPdfUpload({
                           type="button"
                           onClick={() => moveFile(index, index + 1)}
                           disabled={index === selectedFiles.length - 1}
-                          className="rounded-full border border-[#E7E5E4] px-3 py-1.5 text-xs font-black text-[#57534E] disabled:opacity-40 dark:border-white/10 dark:text-white/55"
-                        >
+                          className="rounded-full border border-[#E7E5E4] px-3 py-1.5 text-xs font-black text-[#57534E] disabled:opacity-40 dark:border-white/10 dark:text-white/55">
                           Down
                         </button>
                       </div>
@@ -459,8 +481,7 @@ export default function ImageToPdfUpload({
               type="button"
               onClick={processFiles}
               disabled={isProcessing}
-              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#F97316] px-5 py-3.5 text-sm font-black text-white shadow-[0_16px_35px_rgba(249,115,22,0.22)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60"
-            >
+              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#F97316] px-5 py-3.5 text-sm font-black text-white shadow-[0_16px_35px_rgba(249,115,22,0.22)] transition hover:-translate-y-0.5 hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60">
               {isProcessing ? (
                 <>
                   <Loader2 size={18} className="animate-spin" />
