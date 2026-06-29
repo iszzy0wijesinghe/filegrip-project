@@ -10,6 +10,16 @@ use App\Services\FileTools\PdfDeletePagesService;
 use App\Services\FileTools\PdfToImageService;
 use App\Services\FileTools\WordToPdfService;
 use App\Services\FileTools\PdfToWordService;
+use App\Services\FileTools\ImageCompressService;
+use App\Services\FileTools\ImageResizeService;
+use App\Services\FileTools\ImageConvertService;
+use App\Services\FileTools\ImageCropService;
+use App\Services\FileTools\ImageRotateService;
+use App\Services\FileTools\PdfProtectService;
+use App\Services\FileTools\PdfUnlockService;
+use App\Services\FileTools\PdfWatermarkService;
+use App\Services\FileTools\PdfSignService;
+use App\Services\FileTools\PdfRedactService;
 
 use App\Models\DownloadToken;
 use App\Models\FileJob;
@@ -38,7 +48,17 @@ class FileJobController extends Controller
         PdfReorderPagesService $pdfReorderPagesService,
         PdfToImageService $pdfToImageService,
         WordToPdfService $wordToPdfService,
-        PdfToWordService $pdfToWordService
+        PdfToWordService $pdfToWordService,
+        ImageCompressService $imageCompressService,
+        ImageResizeService $imageResizeService,
+        ImageConvertService $imageConvertService,
+        ImageCropService $imageCropService,
+        ImageRotateService $imageRotateService,
+        PdfProtectService $pdfProtectService,
+PdfUnlockService $pdfUnlockService,
+PdfWatermarkService $pdfWatermarkService,
+PdfSignService $pdfSignService,
+PdfRedactService $pdfRedactService
     ): JsonResponse {
         $tool = Tool::query()
             ->where('slug', $slug)
@@ -62,6 +82,16 @@ class FileJobController extends Controller
 'pdf-to-image', 'pdf-to-jpg', 'pdf-to-png', 'pdf-to-webp' => $this->processPdfToImage($request, $tool, $pdfToImageService),
     'word-to-pdf' => $this->processWordToPdf($request, $tool, $wordToPdfService),
     'pdf-to-word' => $this->processPdfToWord($request, $tool, $pdfToWordService),
+    'compress-image' => $this->processCompressImage($request, $tool, $imageCompressService),
+'resize-image' => $this->processResizeImage($request, $tool, $imageResizeService),
+'convert-image' => $this->processConvertImage($request, $tool, $imageConvertService),
+'crop-image' => $this->processCropImage($request, $tool, $imageCropService),
+'rotate-image' => $this->processRotateImage($request, $tool, $imageRotateService),
+'protect-pdf' => $this->processProtectPdf($request, $tool, $pdfProtectService),
+'unlock-pdf' => $this->processUnlockPdf($request, $tool, $pdfUnlockService),
+'add-watermark' => $this->processAddWatermark($request, $tool, $pdfWatermarkService),
+'sign-pdf' => $this->processSignPdf($request, $tool, $pdfSignService),
+'redact-pdf' => $this->processRedactPdf($request, $tool, $pdfRedactService),
     default => response()->json([
         'message' => 'This tool API is coming next.',
     ], 422),
@@ -1521,6 +1551,810 @@ private function processPdfToWord(
             'status' => 'failed',
             'tool_slug' => $tool->slug,
             'message' => 'PDF to Word conversion failed.',
+            'download_url' => null,
+            'error_message' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+
+private function processCompressImage(
+    Request $request,
+    Tool $tool,
+    ImageCompressService $imageCompressService
+): JsonResponse {
+    $settings = $this->validateSingleImageRequest($request, $tool);
+
+    $quality = (int) ($settings['quality'] ?? 78);
+    $outputFormat = strtolower((string) ($settings['output_format'] ?? 'webp'));
+
+    return $this->processSingleImageTool(
+        request: $request,
+        tool: $tool,
+        outputPrefix: 'filegrip-compressed-image',
+        outputFormat: $outputFormat,
+        successMessage: 'Your image was compressed successfully.',
+        failureMessage: 'Image compression failed.',
+        failureCode: 'compress_image_failed',
+        processor: function (string $inputAbsolutePath, string $outputAbsolutePath) use (
+            $imageCompressService,
+            $outputFormat,
+            $quality
+        ) {
+            return $imageCompressService->compress(
+                $inputAbsolutePath,
+                $outputAbsolutePath,
+                $outputFormat,
+                $quality
+            );
+        }
+    );
+}
+
+private function processResizeImage(
+    Request $request,
+    Tool $tool,
+    ImageResizeService $imageResizeService
+): JsonResponse {
+    $settings = $this->validateSingleImageRequest($request, $tool);
+
+    $width = (int) ($settings['width'] ?? 0);
+    $height = (int) ($settings['height'] ?? 0);
+    $outputFormat = strtolower((string) ($settings['output_format'] ?? 'webp'));
+    $quality = (int) ($settings['quality'] ?? 90);
+
+    if ($width < 1 || $height < 1) {
+        return response()->json([
+            'message' => 'Please enter a valid width and height.',
+        ], 422);
+    }
+
+    if ($width > 12000 || $height > 12000) {
+        return response()->json([
+            'message' => 'Resize dimensions are too large. Please use 12000px or smaller.',
+        ], 422);
+    }
+
+    return $this->processSingleImageTool(
+        request: $request,
+        tool: $tool,
+        outputPrefix: 'filegrip-resized-image',
+        outputFormat: $outputFormat,
+        successMessage: 'Your image was resized successfully.',
+        failureMessage: 'Image resizing failed.',
+        failureCode: 'resize_image_failed',
+        processor: function (string $inputAbsolutePath, string $outputAbsolutePath) use (
+            $imageResizeService,
+            $width,
+            $height,
+            $outputFormat,
+            $quality
+        ) {
+            return $imageResizeService->resize(
+                $inputAbsolutePath,
+                $outputAbsolutePath,
+                $width,
+                $height,
+                $outputFormat,
+                $quality
+            );
+        }
+    );
+}
+
+private function processConvertImage(
+    Request $request,
+    Tool $tool,
+    ImageConvertService $imageConvertService
+): JsonResponse {
+    $settings = $this->validateSingleImageRequest($request, $tool);
+
+    $outputFormat = strtolower((string) ($settings['output_format'] ?? 'webp'));
+    $quality = (int) ($settings['quality'] ?? 88);
+
+    return $this->processSingleImageTool(
+        request: $request,
+        tool: $tool,
+        outputPrefix: 'filegrip-converted-image',
+        outputFormat: $outputFormat,
+        successMessage: 'Your image was converted successfully.',
+        failureMessage: 'Image conversion failed.',
+        failureCode: 'convert_image_failed',
+        processor: function (string $inputAbsolutePath, string $outputAbsolutePath) use (
+            $imageConvertService,
+            $outputFormat,
+            $quality
+        ) {
+            return $imageConvertService->convert(
+                $inputAbsolutePath,
+                $outputAbsolutePath,
+                $outputFormat,
+                $quality
+            );
+        }
+    );
+}
+
+private function processCropImage(
+    Request $request,
+    Tool $tool,
+    ImageCropService $imageCropService
+): JsonResponse {
+    $settings = $this->validateSingleImageRequest($request, $tool);
+
+    $cropX = (int) ($settings['crop_x'] ?? 0);
+    $cropY = (int) ($settings['crop_y'] ?? 0);
+    $cropWidth = (int) ($settings['crop_width'] ?? 0);
+    $cropHeight = (int) ($settings['crop_height'] ?? 0);
+    $outputFormat = strtolower((string) ($settings['output_format'] ?? 'webp'));
+    $quality = (int) ($settings['quality'] ?? 90);
+
+    if ($cropWidth < 1 || $cropHeight < 1) {
+        return response()->json([
+            'message' => 'Please select a valid crop area.',
+        ], 422);
+    }
+
+    return $this->processSingleImageTool(
+        request: $request,
+        tool: $tool,
+        outputPrefix: 'filegrip-cropped-image',
+        outputFormat: $outputFormat,
+        successMessage: 'Your image was cropped successfully.',
+        failureMessage: 'Image cropping failed.',
+        failureCode: 'crop_image_failed',
+        processor: function (string $inputAbsolutePath, string $outputAbsolutePath) use (
+            $imageCropService,
+            $cropX,
+            $cropY,
+            $cropWidth,
+            $cropHeight,
+            $outputFormat,
+            $quality
+        ) {
+            return $imageCropService->crop(
+                $inputAbsolutePath,
+                $outputAbsolutePath,
+                $cropX,
+                $cropY,
+                $cropWidth,
+                $cropHeight,
+                $outputFormat,
+                $quality
+            );
+        }
+    );
+}
+
+private function processRotateImage(
+    Request $request,
+    Tool $tool,
+    ImageRotateService $imageRotateService
+): JsonResponse {
+    $settings = $this->validateSingleImageRequest($request, $tool);
+
+    $rotation = (int) ($settings['rotation'] ?? 90);
+    $outputFormat = strtolower((string) ($settings['output_format'] ?? 'webp'));
+    $quality = (int) ($settings['quality'] ?? 90);
+
+    if (! in_array($rotation, [90, 180, 270], true)) {
+        return response()->json([
+            'message' => 'Rotation must be 90, 180, or 270 degrees.',
+        ], 422);
+    }
+
+    return $this->processSingleImageTool(
+        request: $request,
+        tool: $tool,
+        outputPrefix: 'filegrip-rotated-image',
+        outputFormat: $outputFormat,
+        successMessage: 'Your image was rotated successfully.',
+        failureMessage: 'Image rotation failed.',
+        failureCode: 'rotate_image_failed',
+        processor: function (string $inputAbsolutePath, string $outputAbsolutePath) use (
+            $imageRotateService,
+            $rotation,
+            $outputFormat,
+            $quality
+        ) {
+            return $imageRotateService->rotate(
+                $inputAbsolutePath,
+                $outputAbsolutePath,
+                $rotation,
+                $outputFormat,
+                $quality
+            );
+        }
+    );
+}
+
+/**
+ * @return array<string, mixed>
+ */
+private function validateSingleImageRequest(Request $request, Tool $tool): array
+{
+    $maxKb = ((int) ($tool->max_file_size_mb ?? 25)) * 1024;
+
+    $request->validate([
+        'files' => ['required', 'array', 'size:1'],
+        'files.*' => ['required', 'file', 'mimes:jpg,jpeg,png,webp', 'max:' . $maxKb],
+        'settings' => ['nullable', 'string'],
+    ]);
+
+    return $this->decodeSettings($request->input('settings'));
+}
+
+/**
+ * @param callable(string, string): array<string, mixed> $processor
+ */
+private function processSingleImageTool(
+    Request $request,
+    Tool $tool,
+    string $outputPrefix,
+    string $outputFormat,
+    string $successMessage,
+    string $failureMessage,
+    string $failureCode,
+    callable $processor
+): JsonResponse {
+    $outputFormat = $this->normalizeImageOutputFormat($outputFormat);
+    $settings = $this->decodeSettings($request->input('settings'));
+
+    $uploadedFile = $request->file('files')[0];
+    $uuid = (string) Str::uuid();
+
+    $job = FileJob::query()->create([
+        'uuid' => $uuid,
+        'job_uuid' => $uuid,
+        'tool_id' => $tool->id,
+        'status' => 'processing',
+        'priority' => 0,
+        'input_file_count' => 1,
+        'output_file_count' => 0,
+        'total_input_size_bytes' => 0,
+        'total_output_size_bytes' => 0,
+        'settings' => $settings,
+        'ip_address' => $request->ip(),
+        'user_agent' => substr((string) $request->userAgent(), 0, 500),
+        'started_at' => now(),
+        'expires_at' => now()->addHour(),
+    ]);
+
+    try {
+        $extension = strtolower($uploadedFile->getClientOriginalExtension() ?: 'jpg');
+        $inputStoredName = 'input-' . Str::random(16) . '.' . $extension;
+
+        $inputRelativePath = $uploadedFile->storeAs(
+            "file_jobs/{$uuid}/input",
+            $inputStoredName,
+            'local'
+        );
+
+        $inputAbsolutePath = Storage::disk('local')->path($inputRelativePath);
+        $inputSize = (int) $uploadedFile->getSize();
+
+        FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'input',
+            'original_name' => $uploadedFile->getClientOriginalName(),
+            'stored_name' => $inputStoredName,
+            'mime_type' => $uploadedFile->getClientMimeType() ?: 'application/octet-stream',
+            'extension' => $extension,
+            'size_bytes' => $inputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $inputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $inputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $outputStoredName = $outputPrefix . '-' . now()->format('Ymd-His') . '.' . $outputFormat;
+        $outputRelativePath = "file_jobs/{$uuid}/output/{$outputStoredName}";
+        $outputAbsolutePath = Storage::disk('local')->path($outputRelativePath);
+
+        Storage::disk('local')->makeDirectory("file_jobs/{$uuid}/output");
+
+        $processingResult = $processor($inputAbsolutePath, $outputAbsolutePath);
+
+        $outputSize = filesize($outputAbsolutePath) ?: 0;
+
+        $outputFile = FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'output',
+            'original_name' => $outputPrefix . '.' . $outputFormat,
+            'stored_name' => $outputStoredName,
+            'mime_type' => $this->imageMimeType($outputFormat),
+            'extension' => $outputFormat,
+            'size_bytes' => $outputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $outputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $outputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $plainToken = Str::random(72);
+
+        DownloadToken::query()->create([
+            'file_job_file_id' => $outputFile->id,
+            'token_hash' => hash('sha256', $plainToken),
+            'download_count' => 0,
+            'max_downloads' => 5,
+            'expires_at' => now()->addHour(),
+            'created_at' => now(),
+        ]);
+
+        $job->update([
+            'status' => 'completed',
+            'output_file_count' => (int) ($processingResult['output_file_count'] ?? 1),
+            'total_input_size_bytes' => $inputSize,
+            'total_output_size_bytes' => $outputSize,
+            'finished_at' => now(),
+        ]);
+
+        return response()->json(array_merge([
+            'uuid' => $job->uuid,
+            'status' => 'completed',
+            'tool_slug' => $tool->slug,
+            'message' => $successMessage,
+            'download_url' => url("/api/v1/downloads/{$plainToken}"),
+            'input_size_bytes' => $inputSize,
+            'output_size_bytes' => $outputSize,
+            'output_file_count' => (int) ($processingResult['output_file_count'] ?? 1),
+            'input_file_count' => (int) ($processingResult['input_file_count'] ?? 1),
+            'download_type' => 'image',
+            'output_format' => $outputFormat,
+            'error_message' => null,
+        ], $processingResult));
+    } catch (Throwable $e) {
+        $job->update([
+            'status' => 'failed',
+            'error_code' => $failureCode,
+            'error_message' => $e->getMessage(),
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'failed',
+            'tool_slug' => $tool->slug,
+            'message' => $failureMessage,
+            'download_url' => null,
+            'error_message' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+private function normalizeImageOutputFormat(string $format): string
+{
+    $format = strtolower(trim($format));
+
+    if ($format === 'jpeg') {
+        return 'jpg';
+    }
+
+    if (! in_array($format, ['jpg', 'png', 'webp'], true)) {
+        return 'webp';
+    }
+
+    return $format;
+}
+
+private function imageMimeType(string $format): string
+{
+    return match ($this->normalizeImageOutputFormat($format)) {
+        'jpg' => 'image/jpeg',
+        'png' => 'image/png',
+        'webp' => 'image/webp',
+        default => 'application/octet-stream',
+    };
+}
+
+
+private function processProtectPdf(
+    Request $request,
+    Tool $tool,
+    PdfProtectService $pdfProtectService
+): JsonResponse {
+    $settings = $this->validateSinglePdfRequest($request, $tool);
+
+    $password = (string) ($settings['password'] ?? '');
+    $allowPrinting = (bool) ($settings['allow_printing'] ?? true);
+    $allowCopying = (bool) ($settings['allow_copying'] ?? false);
+    $allowEditing = (bool) ($settings['allow_editing'] ?? false);
+
+    return $this->processSinglePdfSecurityTool(
+        request: $request,
+        tool: $tool,
+        outputPrefix: 'filegrip-protected-pdf',
+        successMessage: 'Your PDF was protected successfully.',
+        failureMessage: 'PDF protection failed.',
+        failureCode: 'protect_pdf_failed',
+        processor: function (string $inputAbsolutePath, string $outputAbsolutePath) use (
+            $pdfProtectService,
+            $password,
+            $allowPrinting,
+            $allowCopying,
+            $allowEditing
+        ) {
+            return $pdfProtectService->protect(
+                $inputAbsolutePath,
+                $outputAbsolutePath,
+                $password,
+                $allowPrinting,
+                $allowCopying,
+                $allowEditing
+            );
+        }
+    );
+}
+
+private function processUnlockPdf(
+    Request $request,
+    Tool $tool,
+    PdfUnlockService $pdfUnlockService
+): JsonResponse {
+    $settings = $this->validateSinglePdfRequest($request, $tool);
+
+    $password = (string) ($settings['password'] ?? '');
+    $confirmedPermission = (bool) ($settings['confirmed_permission'] ?? false);
+
+    return $this->processSinglePdfSecurityTool(
+        request: $request,
+        tool: $tool,
+        outputPrefix: 'filegrip-unlocked-pdf',
+        successMessage: 'Your PDF was unlocked successfully.',
+        failureMessage: 'PDF unlock failed.',
+        failureCode: 'unlock_pdf_failed',
+        processor: function (string $inputAbsolutePath, string $outputAbsolutePath) use (
+            $pdfUnlockService,
+            $password,
+            $confirmedPermission
+        ) {
+            return $pdfUnlockService->unlock(
+                $inputAbsolutePath,
+                $outputAbsolutePath,
+                $password,
+                $confirmedPermission
+            );
+        }
+    );
+}
+
+private function processAddWatermark(
+    Request $request,
+    Tool $tool,
+    PdfWatermarkService $pdfWatermarkService
+): JsonResponse {
+    $settings = $this->validateSinglePdfRequest($request, $tool);
+
+    $watermarkText = (string) ($settings['watermark_text'] ?? 'CONFIDENTIAL');
+    $fontSize = (int) ($settings['font_size'] ?? 42);
+    $opacity = (int) ($settings['opacity'] ?? 28);
+    $rotation = (int) ($settings['rotation'] ?? -35);
+    $position = (string) ($settings['position'] ?? 'center');
+    $repeatWatermark = (bool) ($settings['repeat_watermark'] ?? false);
+    $pageRange = (string) ($settings['page_range'] ?? 'all');
+
+    return $this->processSinglePdfSecurityTool(
+        request: $request,
+        tool: $tool,
+        outputPrefix: 'filegrip-watermarked-pdf',
+        successMessage: 'Your watermark was added successfully.',
+        failureMessage: 'PDF watermarking failed.',
+        failureCode: 'watermark_pdf_failed',
+        processor: function (string $inputAbsolutePath, string $outputAbsolutePath) use (
+            $pdfWatermarkService,
+            $watermarkText,
+            $fontSize,
+            $opacity,
+            $rotation,
+            $position,
+            $repeatWatermark,
+            $pageRange
+        ) {
+            return $pdfWatermarkService->addWatermark(
+                $inputAbsolutePath,
+                $outputAbsolutePath,
+                $watermarkText,
+                $fontSize,
+                $opacity,
+                $rotation,
+                $position,
+                $repeatWatermark,
+                $pageRange
+            );
+        }
+    );
+}
+
+private function processSignPdf(
+    Request $request,
+    Tool $tool,
+    PdfSignService $pdfSignService
+): JsonResponse {
+    $settings = $this->decodeSettings($request->input('settings'));
+    $maxKb = ((int) ($tool->max_file_size_mb ?? 25)) * 1024;
+
+    $request->validate([
+        'files' => ['required', 'array', 'min:1', 'max:2'],
+        'files.0' => ['required', 'file', 'mimes:pdf', 'max:' . $maxKb],
+        'files.1' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+        'settings' => ['nullable', 'string'],
+    ]);
+
+    $signatureMode = (string) ($settings['signature_mode'] ?? 'draw');
+    $signatureValue = (string) ($settings['signature_value'] ?? '');
+    $positionX = (float) ($settings['signature_position_x'] ?? 52);
+    $positionY = (float) ($settings['signature_position_y'] ?? 72);
+    $signatureSize = (int) ($settings['signature_size'] ?? 34);
+    $pageRange = (string) ($settings['page_range'] ?? '1');
+
+    return $this->processSinglePdfSecurityTool(
+        request: $request,
+        tool: $tool,
+        outputPrefix: 'filegrip-signed-pdf',
+        successMessage: 'Your PDF was signed successfully.',
+        failureMessage: 'PDF signing failed.',
+        failureCode: 'sign_pdf_failed',
+        processor: function (string $inputAbsolutePath, string $outputAbsolutePath, ?string $extraAbsolutePath = null) use (
+            $pdfSignService,
+            $signatureMode,
+            $signatureValue,
+            $positionX,
+            $positionY,
+            $signatureSize,
+            $pageRange
+        ) {
+            return $pdfSignService->sign(
+                $inputAbsolutePath,
+                $outputAbsolutePath,
+                $signatureMode,
+                $signatureValue,
+                $positionX,
+                $positionY,
+                $signatureSize,
+                $pageRange,
+                $extraAbsolutePath
+            );
+        },
+        allowSecondFile: true
+    );
+}
+
+private function processRedactPdf(
+    Request $request,
+    Tool $tool,
+    PdfRedactService $pdfRedactService
+): JsonResponse {
+    $settings = $this->validateSinglePdfRequest($request, $tool);
+
+    $pageRange = (string) ($settings['page_range'] ?? '1');
+    $redactionColor = (string) ($settings['redaction_color'] ?? 'black');
+    $boxes = is_array($settings['redaction_boxes'] ?? null)
+        ? $settings['redaction_boxes']
+        : [];
+    $confirmedPermanent = (bool) ($settings['confirmed_permanent_redaction'] ?? false);
+
+    return $this->processSinglePdfSecurityTool(
+        request: $request,
+        tool: $tool,
+        outputPrefix: 'filegrip-redacted-pdf',
+        successMessage: 'Your PDF was redacted successfully.',
+        failureMessage: 'PDF redaction failed.',
+        failureCode: 'redact_pdf_failed',
+        processor: function (string $inputAbsolutePath, string $outputAbsolutePath) use (
+            $pdfRedactService,
+            $boxes,
+            $pageRange,
+            $redactionColor,
+            $confirmedPermanent
+        ) {
+            return $pdfRedactService->redact(
+                $inputAbsolutePath,
+                $outputAbsolutePath,
+                $boxes,
+                $pageRange,
+                $redactionColor,
+                $confirmedPermanent
+            );
+        }
+    );
+}
+
+
+
+/**
+ * @return array<string, mixed>
+ */
+private function validateSinglePdfRequest(Request $request, Tool $tool): array
+{
+    $maxKb = ((int) ($tool->max_file_size_mb ?? 25)) * 1024;
+
+    $request->validate([
+        'files' => ['required', 'array', 'size:1'],
+        'files.*' => ['required', 'file', 'mimes:pdf', 'max:' . $maxKb],
+        'settings' => ['nullable', 'string'],
+    ]);
+
+    return $this->decodeSettings($request->input('settings'));
+}
+
+/**
+ * @param callable(string, string, ?string=): array<string, mixed> $processor
+ */
+private function processSinglePdfSecurityTool(
+    Request $request,
+    Tool $tool,
+    string $outputPrefix,
+    string $successMessage,
+    string $failureMessage,
+    string $failureCode,
+    callable $processor,
+    bool $allowSecondFile = false
+): JsonResponse {
+    $settings = $this->decodeSettings($request->input('settings'));
+    $uploadedFiles = $request->file('files');
+
+    if (! is_array($uploadedFiles) || count($uploadedFiles) < 1) {
+        return response()->json([
+            'message' => 'Please upload a PDF file.',
+        ], 422);
+    }
+
+    $uploadedFile = $uploadedFiles[0];
+    $extraUploadedFile = $allowSecondFile && isset($uploadedFiles[1])
+        ? $uploadedFiles[1]
+        : null;
+
+    $uuid = (string) Str::uuid();
+
+    $job = FileJob::query()->create([
+        'uuid' => $uuid,
+        'job_uuid' => $uuid,
+        'tool_id' => $tool->id,
+        'status' => 'processing',
+        'priority' => 0,
+        'input_file_count' => $extraUploadedFile ? 2 : 1,
+        'output_file_count' => 0,
+        'total_input_size_bytes' => 0,
+        'total_output_size_bytes' => 0,
+        'settings' => $settings,
+        'ip_address' => $request->ip(),
+        'user_agent' => substr((string) $request->userAgent(), 0, 500),
+        'started_at' => now(),
+        'expires_at' => now()->addHour(),
+    ]);
+
+    try {
+        $inputStoredName = 'input-' . Str::random(16) . '.pdf';
+
+        $inputRelativePath = $uploadedFile->storeAs(
+            "file_jobs/{$uuid}/input",
+            $inputStoredName,
+            'local'
+        );
+
+        $inputAbsolutePath = Storage::disk('local')->path($inputRelativePath);
+        $inputSize = (int) $uploadedFile->getSize();
+
+        FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'input',
+            'original_name' => $uploadedFile->getClientOriginalName(),
+            'stored_name' => $inputStoredName,
+            'mime_type' => 'application/pdf',
+            'extension' => 'pdf',
+            'size_bytes' => $inputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $inputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $inputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $extraAbsolutePath = null;
+        $totalInputSize = $inputSize;
+
+        if ($extraUploadedFile) {
+            $extraExtension = strtolower($extraUploadedFile->getClientOriginalExtension() ?: 'png');
+            $extraStoredName = 'signature-' . Str::random(16) . '.' . $extraExtension;
+
+            $extraRelativePath = $extraUploadedFile->storeAs(
+                "file_jobs/{$uuid}/input",
+                $extraStoredName,
+                'local'
+            );
+
+            $extraAbsolutePath = Storage::disk('local')->path($extraRelativePath);
+            $extraSize = (int) $extraUploadedFile->getSize();
+            $totalInputSize += $extraSize;
+
+            FileJobFile::query()->create([
+                'file_job_id' => $job->id,
+                'file_role' => 'input',
+                'original_name' => $extraUploadedFile->getClientOriginalName(),
+                'stored_name' => $extraStoredName,
+                'mime_type' => $extraUploadedFile->getClientMimeType() ?: 'application/octet-stream',
+                'extension' => $extraExtension,
+                'size_bytes' => $extraSize,
+                'storage_disk' => 'local',
+                'storage_path' => $extraRelativePath,
+                'checksum_sha256' => hash_file('sha256', $extraAbsolutePath),
+                'is_deleted' => false,
+            ]);
+        }
+
+        $outputStoredName = $outputPrefix . '-' . now()->format('Ymd-His') . '.pdf';
+        $outputRelativePath = "file_jobs/{$uuid}/output/{$outputStoredName}";
+        $outputAbsolutePath = Storage::disk('local')->path($outputRelativePath);
+
+        Storage::disk('local')->makeDirectory("file_jobs/{$uuid}/output");
+
+        $processingResult = $processor(
+            $inputAbsolutePath,
+            $outputAbsolutePath,
+            $extraAbsolutePath
+        );
+
+        $outputSize = filesize($outputAbsolutePath) ?: 0;
+
+        $outputFile = FileJobFile::query()->create([
+            'file_job_id' => $job->id,
+            'file_role' => 'output',
+            'original_name' => $outputPrefix . '.pdf',
+            'stored_name' => $outputStoredName,
+            'mime_type' => 'application/pdf',
+            'extension' => 'pdf',
+            'size_bytes' => $outputSize,
+            'storage_disk' => 'local',
+            'storage_path' => $outputRelativePath,
+            'checksum_sha256' => hash_file('sha256', $outputAbsolutePath),
+            'is_deleted' => false,
+        ]);
+
+        $plainToken = Str::random(72);
+
+        DownloadToken::query()->create([
+            'file_job_file_id' => $outputFile->id,
+            'token_hash' => hash('sha256', $plainToken),
+            'download_count' => 0,
+            'max_downloads' => 5,
+            'expires_at' => now()->addHour(),
+            'created_at' => now(),
+        ]);
+
+        $job->update([
+            'status' => 'completed',
+            'output_file_count' => (int) ($processingResult['output_file_count'] ?? 1),
+            'total_input_size_bytes' => $totalInputSize,
+            'total_output_size_bytes' => $outputSize,
+            'finished_at' => now(),
+        ]);
+
+        return response()->json(array_merge([
+            'uuid' => $job->uuid,
+            'status' => 'completed',
+            'tool_slug' => $tool->slug,
+            'message' => $successMessage,
+            'download_url' => url("/api/v1/downloads/{$plainToken}"),
+            'input_size_bytes' => $totalInputSize,
+            'output_size_bytes' => $outputSize,
+            'output_file_count' => (int) ($processingResult['output_file_count'] ?? 1),
+            'input_file_count' => $extraUploadedFile ? 2 : 1,
+            'download_type' => 'pdf',
+            'error_message' => null,
+        ], $processingResult));
+    } catch (Throwable $e) {
+        $job->update([
+            'status' => 'failed',
+            'error_code' => $failureCode,
+            'error_message' => $e->getMessage(),
+            'finished_at' => now(),
+        ]);
+
+        return response()->json([
+            'uuid' => $job->uuid,
+            'status' => 'failed',
+            'tool_slug' => $tool->slug,
+            'message' => $failureMessage,
             'download_url' => null,
             'error_message' => $e->getMessage(),
         ], 500);

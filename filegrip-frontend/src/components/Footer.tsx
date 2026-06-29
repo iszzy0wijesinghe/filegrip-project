@@ -5,21 +5,26 @@ import BrandLogo from "./BrandLogo";
 
 const footerLinks = [
   { label: "Tools", href: "/tools" },
-  { label: "Pricing", href: "/pricing" },
   { label: "Privacy", href: "/privacy" },
 ];
 
 export default function Footer() {
   return (
     <footer className="bg-[#0B0F14] text-white">
-      <div className="mx-auto max-w-7xl px-5 py-5 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-4 border-b border-white/10 pb-4 md:flex-row md:items-center md:justify-between">
+      <div className="mx-auto max-w-7xl px-5 py-6 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-5 border-b border-white/10 pb-5 md:flex-row md:items-center md:justify-between">
           <div>
             <BrandLogo variant="light" size="sm" />
 
-            <p className="mt-2 max-w-md text-sm leading-5 text-white/55">
+            <p className="mt-2 max-w-md text-sm leading-6 text-white/55">
               Files, Firmly Handled. Fast, private PDF and file tools by
               Motiora.
+            </p>
+
+            <p className="mt-2 max-w-xl text-xs font-bold leading-5 text-[#FDBA74]/80">
+              Public demo: current FileGrip tools are included for up to 3
+              months. Pro plans for advanced and enhanced features will be
+              introduced later.
             </p>
           </div>
 
@@ -33,12 +38,19 @@ export default function Footer() {
                 {item.label}
               </Link>
             ))}
+
+            <Link
+              href="/tools"
+              className="rounded-full border border-[#F97316]/45 bg-[#F97316]/10 px-3.5 py-1.5 text-sm font-black text-[#FDBA74] transition hover:bg-[#F97316] hover:text-white"
+            >
+              Try demo
+            </Link>
           </nav>
         </div>
 
-        <div className="flex flex-col gap-1.5 pt-3 text-xs font-medium text-white/40 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-1.5 pt-4 text-xs font-medium text-white/40 md:flex-row md:items-center md:justify-between">
           <p>© 2026 FileGrip by Motiora Software Solutions.</p>
-          <p>Fast. Private. Firmly handled.</p>
+          <p>Demo access now. Pro features later.</p>
         </div>
       </div>
     </footer>

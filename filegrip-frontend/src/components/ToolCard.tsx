@@ -21,7 +21,7 @@ export default function ToolCard({ tool }: { tool: Tool }) {
 
         {tool.is_premium && (
           <span className="rounded-full bg-[#111827] px-2 py-1 text-xs font-bold text-white dark:bg-[#F97316]">
-            Pro
+            Advanced
           </span>
         )}
       </div>
