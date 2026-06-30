@@ -202,7 +202,7 @@ class FileGripSeeder extends Seeder
                 'is_premium' => false,
                 'requires_login' => false,
                 'max_file_count' => 1,
-                'max_file_size_mb' => 25,
+                'max_file_size_mb' => 60,
                 'sort_order' => 3,
                 'seo_title' => 'Compress PDF Online Free | FileGrip',
                 'seo_description' => 'Compress PDF files online with FileGrip. Reduce PDF size quickly and securely.',

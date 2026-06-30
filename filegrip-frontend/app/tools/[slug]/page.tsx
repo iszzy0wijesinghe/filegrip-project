@@ -80,20 +80,22 @@ export default async function ToolPage({ params }: PageProps) {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3 lg:self-end">
-                {["Fast processing", "Private by default", "Auto-delete files"].map(
-                  (item) => (
-                    <div
-                      key={item}
-                      className="flex items-center gap-2 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 text-sm font-black text-[#57534E] shadow-sm dark:border-white/10 dark:bg-white/[0.04] dark:text-white/60"
-                    >
-                      <CheckCircle2
-                        className="shrink-0 text-[#22C55E]"
-                        size={18}
-                      />
-                      <span>{item}</span>
-                    </div>
-                  ),
-                )}
+                {[
+                  "Fast processing",
+                  "Private by default",
+                  "Auto-delete files",
+                ].map((item) => (
+                  <div
+                    key={item}
+                    className="flex items-center gap-2 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 text-sm font-black text-[#57534E] shadow-sm dark:border-white/10 dark:bg-white/[0.04] dark:text-white/60"
+                  >
+                    <CheckCircle2
+                      className="shrink-0 text-[#22C55E]"
+                      size={18}
+                    />
+                    <span>{item}</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -102,7 +104,11 @@ export default async function ToolPage({ params }: PageProps) {
             <ToolUploadBox
               toolSlug={tool.slug}
               inputTypes={tool.input_types ?? []}
-              maxFileSizeMb={tool.max_file_size_mb ?? 25}
+              maxFileSizeMb={
+                tool.slug === "compress-pdf"
+                  ? 60
+                  : (tool.max_file_size_mb ?? 25)
+              }
             />
           </div>
         </div>
@@ -159,7 +165,8 @@ export default async function ToolPage({ params }: PageProps) {
             <ShieldCheck className="text-[#FDBA74]" size={32} />
             <h3 className="mt-4 text-xl font-black">Temporary processing</h3>
             <p className="mt-3 leading-7 text-white/65">
-              Free files are processed temporarily and are not saved permanently.
+              Free files are processed temporarily and are not saved
+              permanently.
             </p>
           </div>
 
