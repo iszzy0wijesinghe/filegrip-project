@@ -5,6 +5,7 @@ namespace App\Services\FileTools;
 use Illuminate\Support\Facades\File;
 use RuntimeException;
 use Symfony\Component\Process\Process;
+use App\Support\BinaryResolver;
 
 class PdfCompressService
 {
@@ -19,7 +20,7 @@ class PdfCompressService
         $inputSize = filesize($inputPath) ?: 0;
         $temporaryOutputPath = $outputPath . '.tmp.pdf';
 
-        $ghostscriptPath = $this->ghostscriptPath();
+        $ghostscriptPath = BinaryResolver::ghostscript();
 
         if ($ghostscriptPath) {
             $this->compressWithGhostscript(
@@ -64,40 +65,31 @@ class PdfCompressService
         ];
     }
 
-    private function ghostscriptPath(): ?string
-    {
-        $paths = [
-            '/opt/homebrew/bin/gs',
-            '/usr/local/bin/gs',
-            '/usr/bin/gs',
-        ];
-
-        foreach ($paths as $path) {
-            if (is_executable($path)) {
-                return $path;
-            }
-        }
-
-        $process = new Process(['which', 'gs']);
-        $process->run();
-
-        if ($process->isSuccessful()) {
-            $path = trim($process->getOutput());
-
-            if ($path !== '' && is_executable($path)) {
-                return $path;
-            }
-        }
-
-        return null;
-    }
+  
 
     private function compressWithGhostscript(
-        string $ghostscriptPath,
-        string $inputPath,
-        string $outputPath
-    ): void {
-        $process = new Process([
+    string $ghostscriptPath,
+    string $inputPath,
+    string $outputPath
+): void {
+    $outputDirectory = dirname($outputPath);
+
+    if (! File::exists($outputDirectory)) {
+        File::makeDirectory($outputDirectory, 0755, true);
+    }
+
+    $ghostscriptTempDirectory = storage_path('app/filegrip-tmp/ghostscript');
+
+    if (! File::exists($ghostscriptTempDirectory)) {
+        File::makeDirectory($ghostscriptTempDirectory, 0755, true);
+    }
+
+    $inputPath = str_replace('\\', '/', $inputPath);
+    $outputPath = str_replace('\\', '/', $outputPath);
+    $ghostscriptTempDirectory = str_replace('\\', '/', $ghostscriptTempDirectory);
+
+    $process = new Process(
+        [
             $ghostscriptPath,
             '-sDEVICE=pdfwrite',
             '-dCompatibilityLevel=1.4',
@@ -117,17 +109,27 @@ class PdfCompressService
             '-dBATCH',
             '-sOutputFile=' . $outputPath,
             $inputPath,
-        ]);
+        ],
+        $outputDirectory,
+        [
+            'TEMP' => $ghostscriptTempDirectory,
+            'TMP' => $ghostscriptTempDirectory,
+            'TMPDIR' => $ghostscriptTempDirectory,
+            'GS_TMPDIR' => $ghostscriptTempDirectory,
+        ]
+    );
 
-        $process->setTimeout(180);
-        $process->run();
+    $process->setTimeout(180);
+    $process->run();
 
-        if (! $process->isSuccessful()) {
-            throw new RuntimeException('PDF compression failed: ' . $process->getErrorOutput());
-        }
+    if (! $process->isSuccessful()) {
+        $error = trim($process->getErrorOutput() ?: $process->getOutput());
 
-        if (! File::exists($outputPath) || File::size($outputPath) === 0) {
-            throw new RuntimeException('Compressed PDF was not created.');
-        }
+        throw new RuntimeException('PDF compression failed: ' . $error);
     }
+
+    if (! File::exists($outputPath) || File::size($outputPath) === 0) {
+        throw new RuntimeException('Compressed PDF was not created.');
+    }
+}
 }

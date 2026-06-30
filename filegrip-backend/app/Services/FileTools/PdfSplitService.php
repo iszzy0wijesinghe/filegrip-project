@@ -2,8 +2,11 @@
 
 namespace App\Services\FileTools;
 
+use App\Support\BinaryResolver;
+use Illuminate\Support\Facades\File;
 use RuntimeException;
 use setasign\Fpdi\Fpdi;
+use Symfony\Component\Process\Process;
 use ZipArchive;
 
 class PdfSplitService
@@ -14,15 +17,20 @@ class PdfSplitService
         string $zipPath,
         array $settings
     ): array {
-        if (! file_exists($inputPath)) {
+        if (! File::exists($inputPath)) {
             throw new RuntimeException('Input PDF file missing.');
         }
 
-        if (! is_dir($outputDirectory)) {
-            mkdir($outputDirectory, 0755, true);
+        if (! File::exists($outputDirectory)) {
+            File::makeDirectory($outputDirectory, 0755, true);
         }
 
-        $pageCount = $this->getPageCount($inputPath);
+        $qpdfPath = BinaryResolver::qpdf();
+
+        $pageCount = $qpdfPath
+            ? $this->getPageCountWithQpdf($qpdfPath, $inputPath)
+            : $this->getPageCountWithFpdi($inputPath);
+
         $ranges = $this->resolveRanges($settings, $pageCount);
 
         $createdFiles = [];
@@ -34,7 +42,11 @@ class PdfSplitService
             $fileName = "filegrip-split-{$partNumber}-pages-{$startPage}-{$endPage}.pdf";
             $partPath = $outputDirectory . DIRECTORY_SEPARATOR . $fileName;
 
-            $this->createPdfPart($inputPath, $partPath, $startPage, $endPage);
+            if ($qpdfPath) {
+                $this->createPdfPartWithQpdf($qpdfPath, $inputPath, $partPath, $startPage, $endPage);
+            } else {
+                $this->createPdfPartWithFpdi($inputPath, $partPath, $startPage, $endPage);
+            }
 
             $createdFiles[] = [
                 'name' => $fileName,
@@ -42,7 +54,7 @@ class PdfSplitService
                 'start_page' => $startPage,
                 'end_page' => $endPage,
                 'page_count' => $endPage - $startPage + 1,
-                'size_bytes' => filesize($partPath) ?: 0,
+                'size_bytes' => File::size($partPath) ?: 0,
             ];
         }
 
@@ -52,7 +64,7 @@ class PdfSplitService
             'page_count' => $pageCount,
             'output_file_count' => count($createdFiles),
             'parts' => $createdFiles,
-            'zip_size_bytes' => filesize($zipPath) ?: 0,
+            'zip_size_bytes' => File::size($zipPath) ?: 0,
             'ranges' => array_map(
                 fn ($range) => $range[0] === $range[1]
                     ? (string) $range[0]
@@ -62,14 +74,84 @@ class PdfSplitService
         ];
     }
 
-    private function getPageCount(string $inputPath): int
+    private function getPageCountWithQpdf(string $qpdfPath, string $inputPath): int
+    {
+        $process = new Process([
+            $qpdfPath,
+            '--show-npages',
+            str_replace('\\', '/', $inputPath),
+        ]);
+
+        $process->setTimeout(120);
+        $process->run();
+
+        if (! $process->isSuccessful()) {
+            $error = trim($process->getErrorOutput() ?: $process->getOutput());
+
+            throw new RuntimeException('Could not read PDF page count with qpdf: ' . $error);
+        }
+
+        $pageCount = (int) trim($process->getOutput());
+
+        if ($pageCount < 1) {
+            throw new RuntimeException('Could not determine PDF page count.');
+        }
+
+        return $pageCount;
+    }
+
+    private function getPageCountWithFpdi(string $inputPath): int
     {
         $pdf = new Fpdi();
 
         return $pdf->setSourceFile($inputPath);
     }
 
-    private function createPdfPart(
+    private function createPdfPartWithQpdf(
+        string $qpdfPath,
+        string $inputPath,
+        string $outputPath,
+        int $startPage,
+        int $endPage
+    ): void {
+        $outputDirectory = dirname($outputPath);
+
+        if (! File::exists($outputDirectory)) {
+            File::makeDirectory($outputDirectory, 0755, true);
+        }
+
+        $range = $startPage === $endPage
+            ? (string) $startPage
+            : "{$startPage}-{$endPage}";
+
+        $process = new Process(
+            [
+                $qpdfPath,
+                '--empty',
+                '--pages',
+                str_replace('\\', '/', $inputPath),
+                $range,
+                '--',
+                str_replace('\\', '/', $outputPath),
+            ],
+            $outputDirectory
+        );
+
+        $process->setTimeout(300);
+        $process->run();
+
+        if (! $process->isSuccessful()) {
+            $error = trim($process->getErrorOutput() ?: $process->getOutput());
+
+            throw new RuntimeException('PDF split failed: ' . $error);
+        }
+
+        if (! File::exists($outputPath) || File::size($outputPath) === 0) {
+            throw new RuntimeException('Split PDF part was not created.');
+        }
+    }
+
+    private function createPdfPartWithFpdi(
         string $inputPath,
         string $outputPath,
         int $startPage,
@@ -93,7 +175,7 @@ class PdfSplitService
 
         $pdf->Output('F', $outputPath);
 
-        if (! file_exists($outputPath) || filesize($outputPath) === 0) {
+        if (! File::exists($outputPath) || File::size($outputPath) === 0) {
             throw new RuntimeException('Split PDF part was not created.');
         }
     }
@@ -102,8 +184,8 @@ class PdfSplitService
     {
         $zipDirectory = dirname($zipPath);
 
-        if (! is_dir($zipDirectory)) {
-            mkdir($zipDirectory, 0755, true);
+        if (! File::exists($zipDirectory)) {
+            File::makeDirectory($zipDirectory, 0755, true);
         }
 
         $zip = new ZipArchive();
@@ -118,7 +200,7 @@ class PdfSplitService
 
         $zip->close();
 
-        if (! file_exists($zipPath) || filesize($zipPath) === 0) {
+        if (! File::exists($zipPath) || File::size($zipPath) === 0) {
             throw new RuntimeException('ZIP file was not created.');
         }
     }

@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\File;
 use RuntimeException;
 use setasign\Fpdi\Fpdi;
 use Symfony\Component\Process\Process;
+use App\Support\BinaryResolver;
 
 class PdfRedactService
 {
@@ -47,7 +48,7 @@ class PdfRedactService
 
         $this->ensureDirectory($outputPath);
 
-        $gsPath = $this->ghostscriptPath();
+        $gsPath = BinaryResolver::ghostscript();
 
         if (! $gsPath) {
             throw new RuntimeException('Ghostscript is not installed or could not be found.');
@@ -319,31 +320,5 @@ class PdfRedactService
         return $normalized;
     }
 
-    private function ghostscriptPath(): ?string
-    {
-        $paths = [
-            '/opt/homebrew/bin/gs',
-            '/usr/local/bin/gs',
-            '/usr/bin/gs',
-        ];
-
-        foreach ($paths as $path) {
-            if (is_executable($path)) {
-                return $path;
-            }
-        }
-
-        $process = new Process(['which', 'gs']);
-        $process->run();
-
-        if ($process->isSuccessful()) {
-            $path = trim($process->getOutput());
-
-            if ($path !== '' && is_executable($path)) {
-                return $path;
-            }
-        }
-
-        return null;
-    }
+ 
 }

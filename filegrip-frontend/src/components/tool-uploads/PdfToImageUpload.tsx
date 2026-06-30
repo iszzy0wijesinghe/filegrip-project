@@ -279,7 +279,7 @@ export default function PdfToImageUpload({
     try {
       const [result] = await Promise.all([
         createFileJob({
-          toolSlug: "pdf-to-image",
+          toolSlug,
           files: [selectedFile],
           settings: {
             output_format: outputFormat,

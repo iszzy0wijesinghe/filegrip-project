@@ -2,6 +2,7 @@
 
 namespace App\Services\FileTools;
 
+use App\Support\BinaryResolver;
 use Illuminate\Support\Facades\File;
 use RuntimeException;
 use setasign\Fpdi\Fpdi;
@@ -25,21 +26,25 @@ class PdfToImageService
         string $zipPath,
         string $format
     ): array {
-        if (! file_exists($inputPath)) {
+        if (! File::exists($inputPath)) {
             throw new RuntimeException('Input PDF file missing.');
         }
 
         $format = strtolower(trim($format));
 
-        if (! in_array($format, ['jpg', 'png', 'webp'], true)) {
+        if (! in_array($format, ['jpg', 'jpeg', 'png', 'webp'], true)) {
             throw new RuntimeException('Invalid image output format.');
+        }
+
+        if ($format === 'jpeg') {
+            $format = 'jpg';
         }
 
         if (! File::exists($outputDirectory)) {
             File::makeDirectory($outputDirectory, 0755, true);
         }
 
-        $ghostscriptPath = $this->ghostscriptPath();
+        $ghostscriptPath = BinaryResolver::ghostscript();
 
         if (! $ghostscriptPath) {
             throw new RuntimeException('Ghostscript is not installed or could not be found.');
@@ -86,41 +91,34 @@ class PdfToImageService
             'page_count' => $pageCount,
             'output_file_count' => count($createdFiles),
             'format' => $format,
-            'zip_size_bytes' => filesize($zipPath) ?: 0,
+            'zip_size_bytes' => File::size($zipPath) ?: 0,
             'files' => $createdFiles,
         ];
     }
 
-    private function ghostscriptPath(): ?string
-    {
-        $paths = [
-            '/opt/homebrew/bin/gs',
-            '/usr/local/bin/gs',
-            '/usr/bin/gs',
-        ];
-
-        foreach ($paths as $path) {
-            if (is_executable($path)) {
-                return $path;
-            }
-        }
-
-        $process = new Process(['which', 'gs']);
-        $process->run();
-
-        if ($process->isSuccessful()) {
-            $path = trim($process->getOutput());
-
-            if ($path !== '' && is_executable($path)) {
-                return $path;
-            }
-        }
-
-        return null;
-    }
-
     private function getPageCount(string $inputPath): int
     {
+        $qpdfPath = BinaryResolver::qpdf();
+
+        if ($qpdfPath) {
+            $process = new Process([
+                $qpdfPath,
+                '--show-npages',
+                str_replace('\\', '/', $inputPath),
+            ]);
+
+            $process->setTimeout(120);
+            $process->run();
+
+            if ($process->isSuccessful()) {
+                $pageCount = (int) trim($process->getOutput());
+
+                if ($pageCount > 0) {
+                    return $pageCount;
+                }
+            }
+        }
+
         try {
             $pdf = new Fpdi();
 
@@ -136,6 +134,22 @@ class PdfToImageService
         string $outputPattern,
         string $format
     ): void {
+        $outputDirectory = dirname($outputPattern);
+
+        if (! File::exists($outputDirectory)) {
+            File::makeDirectory($outputDirectory, 0755, true);
+        }
+
+        $ghostscriptTempDirectory = storage_path('app/filegrip-tmp/ghostscript');
+
+        if (! File::exists($ghostscriptTempDirectory)) {
+            File::makeDirectory($ghostscriptTempDirectory, 0755, true);
+        }
+
+        $inputPath = str_replace('\\', '/', $inputPath);
+        $outputPattern = str_replace('\\', '/', $outputPattern);
+        $ghostscriptTempDirectory = str_replace('\\', '/', $ghostscriptTempDirectory);
+
         $device = match ($format) {
             'png' => 'png16m',
             default => 'jpeg',
@@ -143,27 +157,51 @@ class PdfToImageService
 
         $command = [
             $ghostscriptPath,
+
+            // Safe batch rendering
             '-dSAFER',
             '-dBATCH',
             '-dNOPAUSE',
             '-dQUIET',
-            '-r160',
+
+            // Better quality
+            '-r200',
+            '-dTextAlphaBits=4',
+            '-dGraphicsAlphaBits=4',
+
+            // Important for PDFs with strange CropBox/MediaBox/rotation metadata.
+            // This usually fixes cropped or shifted output.
+            '-dUseCropBox',
+            '-dPrinted=false',
+
             '-sDEVICE=' . $device,
         ];
 
         if ($format === 'jpg') {
-            $command[] = '-dJPEGQ=88';
+            $command[] = '-dJPEGQ=90';
         }
 
         $command[] = '-sOutputFile=' . $outputPattern;
         $command[] = $inputPath;
 
-        $process = new Process($command);
+        $process = new Process(
+            $command,
+            $outputDirectory,
+            [
+                'TEMP' => $ghostscriptTempDirectory,
+                'TMP' => $ghostscriptTempDirectory,
+                'TMPDIR' => $ghostscriptTempDirectory,
+                'GS_TMPDIR' => $ghostscriptTempDirectory,
+            ]
+        );
+
         $process->setTimeout(300);
         $process->run();
 
         if (! $process->isSuccessful()) {
-            throw new RuntimeException('PDF to image conversion failed: ' . trim($process->getErrorOutput()));
+            $error = trim($process->getErrorOutput() ?: $process->getOutput());
+
+            throw new RuntimeException('PDF to image conversion failed: ' . $error);
         }
     }
 
@@ -203,7 +241,7 @@ class PdfToImageService
 
             imagedestroy($image);
 
-            if (! $success || ! file_exists($webpPath) || filesize($webpPath) === 0) {
+            if (! $success || ! File::exists($webpPath) || File::size($webpPath) === 0) {
                 throw new RuntimeException('Could not convert PNG page to WEBP.');
             }
 
@@ -224,7 +262,7 @@ class PdfToImageService
             return [
                 'name' => basename($path),
                 'path' => $path,
-                'size_bytes' => filesize($path) ?: 0,
+                'size_bytes' => File::size($path) ?: 0,
             ];
         }, $files));
     }
@@ -252,7 +290,7 @@ class PdfToImageService
 
         $zip->close();
 
-        if (! file_exists($zipPath) || filesize($zipPath) === 0) {
+        if (! File::exists($zipPath) || File::size($zipPath) === 0) {
             throw new RuntimeException('ZIP file was not created.');
         }
     }

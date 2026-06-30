@@ -5,6 +5,7 @@ namespace App\Services\FileTools;
 use Illuminate\Support\Facades\File;
 use RuntimeException;
 use Symfony\Component\Process\Process;
+use App\Support\BinaryResolver;
 
 class WordToPdfService
 {
@@ -41,13 +42,13 @@ class WordToPdfService
         File::makeDirectory($temporaryDirectory, 0755, true);
         File::makeDirectory($profileDirectory, 0755, true);
 
-        $sofficePath = $this->sofficePath();
+        $sofficePath = BinaryResolver::libreOffice();
 
         if (! $sofficePath) {
             throw new RuntimeException('LibreOffice is not installed or could not be found.');
         }
 
-        $profileUrl = 'file://' . $profileDirectory;
+        $profileUrl = BinaryResolver::pathToFileUrl($profileDirectory);
 
         $process = new Process([
             $sofficePath,
@@ -103,45 +104,7 @@ class WordToPdfService
         ];
     }
 
-    private function sofficePath(): ?string
-    {
-        $paths = [
-            '/Applications/LibreOffice.app/Contents/MacOS/soffice',
-            '/opt/homebrew/bin/soffice',
-            '/usr/local/bin/soffice',
-            '/usr/bin/soffice',
-        ];
-
-        foreach ($paths as $path) {
-            if (is_executable($path)) {
-                return $path;
-            }
-        }
-
-        $process = new Process(['which', 'soffice']);
-        $process->run();
-
-        if ($process->isSuccessful()) {
-            $path = trim($process->getOutput());
-
-            if ($path !== '' && is_executable($path)) {
-                return $path;
-            }
-        }
-
-        $process = new Process(['which', 'libreoffice']);
-        $process->run();
-
-        if ($process->isSuccessful()) {
-            $path = trim($process->getOutput());
-
-            if ($path !== '' && is_executable($path)) {
-                return $path;
-            }
-        }
-
-        return null;
-    }
+   
 
     private function findCreatedPdf(string $directory): ?string
     {

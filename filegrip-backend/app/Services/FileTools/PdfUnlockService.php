@@ -5,6 +5,7 @@ namespace App\Services\FileTools;
 use Illuminate\Support\Facades\File;
 use RuntimeException;
 use Symfony\Component\Process\Process;
+use App\Support\BinaryResolver;
 
 class PdfUnlockService
 {
@@ -38,7 +39,7 @@ class PdfUnlockService
 
         $this->ensureDirectory($outputPath);
 
-        $qpdfPath = $this->qpdfPath();
+        $qpdfPath = BinaryResolver::qpdf();
 
         if (! $qpdfPath) {
             throw new RuntimeException('qpdf is not installed or could not be found.');
@@ -84,31 +85,5 @@ class PdfUnlockService
         }
     }
 
-    private function qpdfPath(): ?string
-    {
-        $paths = [
-            '/opt/homebrew/bin/qpdf',
-            '/usr/local/bin/qpdf',
-            '/usr/bin/qpdf',
-        ];
-
-        foreach ($paths as $path) {
-            if (is_executable($path)) {
-                return $path;
-            }
-        }
-
-        $process = new Process(['which', 'qpdf']);
-        $process->run();
-
-        if ($process->isSuccessful()) {
-            $path = trim($process->getOutput());
-
-            if ($path !== '' && is_executable($path)) {
-                return $path;
-            }
-        }
-
-        return null;
-    }
+   
 }

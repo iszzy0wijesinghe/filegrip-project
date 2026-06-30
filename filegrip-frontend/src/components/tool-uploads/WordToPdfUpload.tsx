@@ -18,7 +18,7 @@ import ToolResultCard from "./ToolResultCard";
 import ToolLimitModal from "./ToolLimitModal";
 
 type WordToPdfUploadProps = {
-  toolSlug: string;
+  toolSlug?: string;
   inputTypes: string[];
   maxFileSizeMb?: number | null;
 };
@@ -67,6 +67,7 @@ function getDocumentType(file: File) {
 }
 
 export default function WordToPdfUpload({
+  toolSlug = "word-to-pdf",
   inputTypes,
   maxFileSizeMb = 25,
 }: WordToPdfUploadProps) {
@@ -121,8 +122,7 @@ export default function WordToPdfUpload({
       setLimitModal({
         isOpen: true,
         title: "Hey Homie, this document is too large.",
-        message:
-          `"${file.name}" is bigger than our maximum upload limit. Try reducing the document size, removing heavy images, or splitting the document first.`,
+        message: `"${file.name}" is bigger than our maximum upload limit. Try reducing the document size, removing heavy images, or splitting the document first.`,
         actionLabel: "Try PDF Tools",
         actionHref: "/tools",
         variant: "compress",
@@ -176,7 +176,7 @@ export default function WordToPdfUpload({
     try {
       const [result] = await Promise.all([
         createFileJob({
-          toolSlug: "word-to-pdf",
+          toolSlug,
           files: [selectedFile],
           settings: {},
         }),
