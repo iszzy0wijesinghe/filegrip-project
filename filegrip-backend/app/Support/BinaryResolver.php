@@ -184,3 +184,4 @@ class BinaryResolver
         return is_file($path) && is_executable($path);
     }
 }
+
